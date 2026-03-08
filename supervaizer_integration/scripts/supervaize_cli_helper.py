@@ -156,7 +156,7 @@ def _questions_payload() -> dict[str, Any]:
                 "id": "agent_entrypoint",
                 "category": "Target Function",
                 "question": "What Python function should Supervaizer call to start the agent workflow (module path + function)?",
-                "why": "This becomes the `job_start` method target and the wrapper call in `sv_main.py`.",
+                "why": "This becomes the `job_start` method target and the wrapper call in `agent_impl.py`.",
             },
             {
                 "id": "job_definition",
@@ -174,7 +174,7 @@ def _questions_payload() -> dict[str, Any]:
                 "id": "case_source_field",
                 "category": "Case Mapping",
                 "question": "Which input field contains the case items (e.g., `emails`, `phone_numbers`) and how is it encoded (CSV/list/single)?",
-                "why": "Used to build the case loop in `sv_main.py`.",
+                "why": "Used to build the case loop in `agent_impl.py`.",
             },
             {
                 "id": "step_list",
@@ -222,7 +222,7 @@ def _spec_template() -> dict[str, Any]:
             "name": "my_agent_project",
             "output_dir": ".",
             "controller_filename": "supervaizer_control.py",
-            "workflow_filename": "sv_main.py",
+            "workflow_filename": "agent_impl.py",
         },
         "integration": {
             "agent_slug": "my_agent",
@@ -430,7 +430,7 @@ def _wizard_impl(output_file: str, pretty: bool) -> None:
             "next_steps": [
                 "Review and edit the generated spec (especially job_mapping, steps, start_fields, and agent_parameters).",
                 "Run analyze-agent on the target project if you need help choosing the target function.",
-                "Run scaffold-integration with this spec to generate supervaizer_control.py and sv_main.py.",
+                "Run scaffold-integration with this spec to generate supervaizer_control.py and agent_impl.py.",
             ],
             "spec": spec if pretty else None,
         },
@@ -900,7 +900,7 @@ def _render_sv_main_py(spec: dict[str, Any], controller_filename: str, workflow_
             return {{
                 "status": "stopped",
                 "timestamp": datetime.now().isoformat(),
-                "message": "Implement project-specific stop behavior in sv_main.py",
+                "message": "Implement project-specific stop behavior in agent_impl.py",
             }}
 
 
@@ -908,7 +908,7 @@ def _render_sv_main_py(spec: dict[str, Any], controller_filename: str, workflow_
             return {{
                 "status": "completed",
                 "timestamp": datetime.now().isoformat(),
-                "message": "Implement project-specific status behavior in sv_main.py",
+                "message": "Implement project-specific status behavior in agent_impl.py",
             }}
         """
     )
@@ -937,7 +937,7 @@ def _scaffold_integration_impl(
     project = spec.setdefault("project", {})
 
     controller_file = controller_filename or str(project.get("controller_filename") or "supervaizer_control.py")
-    workflow_file = workflow_filename or str(project.get("workflow_filename") or "sv_main.py")
+    workflow_file = workflow_filename or str(project.get("workflow_filename") or "agent_impl.py")
     out_dir = Path(output_dir or str(project.get("output_dir") or ".")).expanduser().resolve()
 
     controller_content = _render_controller_py(spec, controller_file, workflow_file)
@@ -960,7 +960,7 @@ def _scaffold_integration_impl(
                 "workflow": str(workflow_path),
             },
             "next_steps": [
-                "Review the generated files and customize field-to-function mapping in sv_main.py.",
+                "Review the generated files and customize field-to-function mapping in agent_impl.py.",
                 "Refine step updates (payloads, HITL, errors) to match your business workflow.",
                 "Run the controller and test with trigger-job --dry-run, then a real run.",
             ],
@@ -1286,12 +1286,12 @@ def scaffold_integration(
     workflow_filename: str | None = typer.Option(
         None,
         "--workflow-filename",
-        help="Workflow wrapper file name (default from spec, usually sv_main.py).",
+        help="Workflow wrapper file name (default from spec, usually agent_impl.py).",
     ),
     force: bool = typer.Option(False, "--force", help="Overwrite existing files."),
     pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
 ) -> None:
-    """Generate and customize supervaizer_control.py + sv_main.py from an integration spec."""
+    """Generate and customize supervaizer_control.py + agent_impl.py from an integration spec."""
     _handle(
         pretty,
         _scaffold_integration_impl,

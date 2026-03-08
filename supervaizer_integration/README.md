@@ -2,26 +2,18 @@
 
 Skill for integrating an **existing Python agent** with the **Supervaizer controller** and Supervaize SaaS.
 
-The primary goal is not just to start a controller. It is to correctly map the user's agent workflow to:
+The primary goal is to correctly map the user's agent workflow to:
 
 - **Job**: one end-to-end run
 - **Case**: one repeated unit inside the job (email, phone number, doc, lead, etc.)
 - **Steps**: meaningful stages inside each case
 
-Once that mapping is clear, the skill scaffolds and helps customize:
+Once that mapping is clear, the skill generates and helps customize:
 
-- `supervaizer_control.py` (or `supervaizer_controll.py` if a project uses that spelling)
-- `sv_main.py`
-
-## Reference Integrations
-
-Use these examples as models for reasoning and implementation:
-
-- Email AI Agent (Supervaizer branch): [github.com/alain-sv/Email-AI-Agent/tree/supervaizer](https://github.com/alain-sv/Email-AI-Agent/tree/supervaizer)
-- Callagen local integration:
-  - `/Users/alp/GitRepo/SUPERVAIZE/9agents/callagen/supervaizer_control.py`
-  - `/Users/alp/GitRepo/SUPERVAIZE/9agents/callagen/callagen/call_agent.py`
-  - `/Users/alp/GitRepo/SUPERVAIZE/9agents/callagen/callagen/steps.py`
+- `supervaizer_control.py` — controller configuration (agent, methods, parameters, step nodes, server)
+- A **workflow adapter** file — bridges Supervaizer's calling convention to the user's existing agent logic (naming fits the project: `agent_impl.py`, `sv_main.py`, or a module inside the agent's package)
+- `.envrc_template` — environment variables for Supervaize platform and agent secrets
+- Optionally a separate `steps.py` for complex step node definitions
 
 ## Environment Variables (Supervaize SaaS)
 
@@ -31,138 +23,71 @@ export SUPERVAIZE_WORKSPACE_ID=team_1
 export SUPERVAIZE_API_URL=https://app.supervaize.com
 ```
 
-Optional local controller auth:
+## Workflow
 
-```bash
-export CONTROLLER_AUTH_KEY=...
-```
+The skill follows a 5-phase workflow:
 
-## Helper CLI
+1. **Project Discovery & Analysis** — scan the project structure, analyze agent code, identify inputs/outputs/stages
+2. **Interactive Requirements Gathering** — ask 6 question sets covering agent identity, cases & steps, data reporting, HITL, parameters, and job input fields
+3. **Install Supervaizer Package** — detect package manager and install `supervaizer` with dependencies
+4. **Generate Integration Files** — create controller config, workflow adapter, env template
+5. **Validation & Next Steps** — verify compilation, present summary, offer further help
 
-Path:
+See `SKILL.md` for full phase-by-phase instructions and code templates.
 
-`/Volumes/SSDext1TB/Documents/GitRepo/SUPERVAIZE/runwaize_skills/supervaizer_integration/scripts/supervaize_cli_helper.py`
+## Helper CLI (Optional)
 
-Dependency:
+Path: `scripts/supervaize_cli_helper.py`
 
 ```bash
 pip install typer
 ```
 
-Run commands from inside the skill folder, or use absolute paths.
-
-## Recommended Workflow
-
-### 1) Print the discovery questions (Job / Case / Step mapping)
+### Commands
 
 ```bash
+# Print discovery questions
 python scripts/supervaize_cli_helper.py questions --pretty
-```
 
-### 2) Analyze the user's agent to find likely entrypoints and loops
-
-```bash
+# Analyze agent for entrypoints and loops
 python scripts/supervaize_cli_helper.py analyze-agent \
-  --project-root /path/to/user-agent \
-  --pretty
-```
+  --project-root /path/to/user-agent --pretty
 
-This returns candidate functions with signatures and loop hints to help determine:
-
-- what should become the Supervaizer `job_start` target
-- what repeated loop item should become a Case
-- what loop stages should become Steps
-
-### 3) Create an integration spec (interactive wizard)
-
-```bash
+# Interactive spec wizard
 python scripts/supervaize_cli_helper.py wizard \
-  --output-file integration_spec.json \
-  --pretty
-```
+  --output-file integration_spec.json --pretty
 
-Or create a template and fill it manually:
-
-```bash
+# Generate spec template
 python scripts/supervaize_cli_helper.py spec-template \
-  --output-file integration_spec.json \
-  --pretty
-```
+  --output-file integration_spec.json --pretty
 
-The spec captures:
-
-- target module/function
-- job/case/step mapping
-- `job_start.fields`
-- `ParametersSetup` env vars/secrets
-- wrapper function naming and generated filenames
-
-### 4) Scaffold `supervaizer_control.py` and `sv_main.py`
-
-```bash
+# Scaffold controller files from spec
 python scripts/supervaize_cli_helper.py scaffold-integration \
   --spec-file integration_spec.json \
-  --output-dir /path/to/user-agent \
-  --force \
-  --pretty
-```
+  --output-dir /path/to/user-agent --force --pretty
 
-If the project expects `supervaizer_controll.py`:
-
-```bash
-python scripts/supervaize_cli_helper.py scaffold-integration \
-  --spec-file integration_spec.json \
-  --output-dir /path/to/user-agent \
-  --controller-filename supervaizer_controll.py \
-  --force
-```
-
-### 5) Customize the generated wrappers (required)
-
-The scaffolds are a structured starting point. You must still:
-
-- move the target function call to the correct Step(s)
-- add field parsing/type conversions
-- implement HITL steps where needed
-- enrich case payloads and final job output
-- tune `CaseNodes` types and descriptions in the controller file
-
-## Controller Runtime Utilities
-
-### Check env vars
-
-```bash
+# Check env vars
 python scripts/supervaize_cli_helper.py env-status --pretty
-python scripts/supervaize_cli_helper.py env-status --shell-template
-```
 
-### Discover controller routes
-
-```bash
+# Discover controller routes
 python scripts/supervaize_cli_helper.py discover-controller \
-  --controller-url http://127.0.0.1:8000 \
-  --pretty
-```
+  --controller-url http://127.0.0.1:8000 --pretty
 
-### Trigger a job (dry-run)
-
-```bash
+# Trigger a test job
 python scripts/supervaize_cli_helper.py trigger-job \
   --controller-url http://127.0.0.1:8000 \
-  --agent-name my_agent \
-  --agent-method start \
+  --agent-name my_agent --agent-method start \
   --user-id local-test \
   --params-json '{"fields":{"input_text":"hello"}}' \
-  --dry-run \
-  --pretty
+  --dry-run --pretty
 ```
 
-## Important Integration Rule
+## Key Principle
 
-The integration is successful only when the **semantic flow is correct**:
+The most important integration decision is **semantic mapping**, not syntax:
 
-- the Job corresponds to one real user run
-- Cases represent the repeated work units users care about
-- Steps represent the meaningful milestones they want to observe/approve
+- Job = one user-visible run
+- Case = one repeated unit inside the run (if applicable)
+- Step = one meaningful stage inside a case - with or without humain in the loop
 
-If needed, revisit the mapping before coding further.
+If this mapping is wrong, the controller code may run but the Supervaize UI will be misleading.

@@ -35,8 +35,10 @@ Only external dependency: `typer` (`pip install typer`).
 
 ### supervaizer_integration (1,366 lines)
 
-- **Specification-driven code generation**: JSON spec defines job/case/step mapping, then `scaffold-integration` generates `supervaizer_control.py` and `sv_main.py`
+- **5-phase interactive workflow**: Project Discovery → Requirements Gathering → Package Install → Generate Files → Validation
+- **Generates**: `supervaizer_control.py` (controller config), a workflow adapter file (naming fits project), `.envrc_template`, optionally `steps.py`. Does NOT generate `main.py` (the user's project already has one).
 - **AST-based agent analysis**: `analyze-agent` scans Python files for entrypoint functions using `ast` module, scoring by parameter count and loop detection
+- **Specification-driven code generation**: JSON spec defines job/case/step mapping for CLI-based scaffolding
 - Key commands: `questions`, `spec-template`, `wizard`, `analyze-agent`, `scaffold-integration`, `env-status`, `discover-controller`, `trigger-job`
 
 ### supervaize_access (1,474 lines)
