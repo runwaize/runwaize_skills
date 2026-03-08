@@ -1,0 +1,5 @@
+{
+  "name": "supervaize-access",
+  "description": "Operate against an existing Supervaize workspace from a chatbot or CLI agent",
+  "version": "1.0.0"
+}

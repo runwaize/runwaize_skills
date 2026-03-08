@@ -1,0 +1,53 @@
+{
+  "name": "runwaize-skills",
+  "owner": {
+    "name": "Runwaize",
+    "email": "support@runwaize.com"
+  },
+  "metadata": {
+    "description": "Agent skills for the Runwaize ecosystem"
+  },
+  "plugins": [
+    {
+      "name": "supervaizer-integration",
+      "source": "./supervaizer_integration",
+      "description": "Integrate any existing Python agent with the Supervaizer controller and Supervaize platform",
+      "version": "1.0.0",
+      "author": {
+        "name": "Runwaize"
+      },
+      "homepage": "https://docs.runwaize.com/docs/integrations/skills/supervaizer-integration",
+      "repository": "https://github.com/runwaize/runwaize_skills",
+      "license": "MIT",
+      "keywords": [
+        "supervaize",
+        "supervaizer",
+        "agent",
+        "integration",
+        "runwaize",
+        "a2a"
+      ],
+      "category": "integrations"
+    },
+    {
+      "name": "supervaize-access",
+      "source": "./supervaize_access",
+      "description": "Operate against an existing Supervaize workspace from a chatbot or CLI agent",
+      "version": "0.1.0",
+      "author": {
+        "name": "Runwaize"
+      },
+      "homepage": "https://docs.runwaize.com/docs/integrations/skills/",
+      "repository": "https://github.com/runwaize/runwaize_skills",
+      "license": "MIT",
+      "keywords": [
+        "supervaize",
+        "workspace",
+        "orchestration",
+        "runwaize",
+        "mcp"
+      ],
+      "category": "integrations"
+    }
+  ]
+}

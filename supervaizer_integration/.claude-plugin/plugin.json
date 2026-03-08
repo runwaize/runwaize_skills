@@ -1,0 +1,5 @@
+{
+  "name": "supervaizer-integration",
+  "description": "Integrate any existing Python agent with the Supervaizer controller and Supervaize platform",
+  "version": "1.0.0"
+}
