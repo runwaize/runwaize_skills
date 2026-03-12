@@ -1,5 +1,6 @@
 ---
 name: supervaizer_integration
+version: "1.0.0"
 description: Use when a user has an existing Python agent and wants to integrate the Supervaizer controller into it. This skill analyzes the agent logic, interactively gathers requirements, installs the supervaizer package, and generates fully customized controller files.
 ---
 

@@ -1,16 +1,26 @@
 ---
 name: supervaize_access
-description: Use when a user wants a chatbot/CLI agent to interact with the Supervaize SaaS workspace (register with API key, create missions, inspect cases/steps, list agent missions, and check job status) via the Supervaize API and/or the Supervaize MCP server. Includes a helper CLI that maps natural-language commands to REST/MCP/controller calls.
+version: "1.0.0"
+description: For Supervaize users: use when a chatbot/CLI/IDE agent should interact with a Supervaize workspace (register with API key, create/manage missions and agents, inspect cases/steps, human-in-the-loop) via the Supervaize REST API and/or MCP server. Includes a helper CLI that maps natural-language commands to REST/MCP/controller calls.
 ---
 
 # Supervaize Access
 
-Use this skill when the user wants a chatbot (Claude CLI, Gemini CLI, Codex, etc.) to **operate against an existing Supervaize workspace**.
+**This skill is for Supervaize users** (customers) to give to their AI assistant (e.g. Cursor, Claude CLI, Gemini CLI, Codex) so it can manage their Supervaize workspace with their API key. Install it from the [runwaize_skills](https://github.com/supervaize/runwaize_skills) repo so the agent can list and edit agents, create and manage missions, and use case/step and human-in-the-loop via MCP.
+
+Use this skill when the user wants a chatbot or IDE agent to **operate against an existing Supervaize workspace**.
 
 This is a **separate skill** from `supervaizer_integration`.
 
 - `supervaizer_integration` = add Supervaizer controller instrumentation to a custom Python agent
-- `supervaize_access` = use Supervaize APIs/MCP from a chatbot after credentials/workspace are known
+- `supervaize_access` = use Supervaize APIs/MCP from a chatbot/IDE after credentials/workspace are known
+
+## REST and MCP (Studio URLs and permissions)
+
+- **REST base**: `{base_url}/w/{team_slug}/api/v1/` — full CRUD for **agents** and **missions**. Auth: `Api-Key: <key>`.
+- **MCP endpoint**: `{base_url}/api/mcp/` (root-level; not under `/w/{team_slug}/`). Same API key or Bearer (n8n). Tools: `report_case_start`, `report_case_step`, `request_human_input`, `get_case_status`, `report_case_status`, `register_agent_parameters`. All require `team_slug` in arguments.
+- **Permissions**: MCP enforces the same as REST: the key’s user must be a member of the workspace; read-only users are denied write tools.
+- **Gaps**: No REST CRUD with API key for jobs or cases (create/list/detail/start/stop are session-only). Case creation and step reporting are via MCP. See [reference.md](reference.md) for full REST path list and MCP tool args.
 
 ## What This Skill Enables
 
@@ -29,8 +39,8 @@ The helper supports **three backends** because no single surface exposes everyth
 
 1. Supervaize SaaS REST API (OpenAPI / attached YAML)
    - Works for teams, agents, missions, and controller events (`ctrl-events`)
-2. Supervaize MCP HTTP endpoint (`apps/sv_entities/api/mcp`)
-   - Works for MCP tools like `get_case_status`, `report_case_start`, `report_case_step`
+2. Supervaize MCP HTTP endpoint (`{base_url}/api/mcp/` — root-level, no team in path)
+   - Works for MCP tools like `get_case_status`, `report_case_start`, `report_case_step`, `request_human_input`, `report_case_status`, `register_agent_parameters`
 3. Supervaizer controller (optional)
    - Needed for actual generic `start-job` (`POST /job/start`)
 
@@ -53,7 +63,8 @@ export SUPERVAIZE_API_URL=https://app.supervaize.com
 Optional (for MCP / controller flows):
 
 ```bash
-export SUPERVAIZE_MCP_URL=https://app.supervaize.com/w/team_1/api/mcp
+# MCP is at root; no /w/team_slug in path
+export SUPERVAIZE_MCP_URL=https://app.supervaize.com/api/mcp
 export SUPERVAIZE_CONTROLLER_URL=http://127.0.0.1:8000
 export CONTROLLER_AUTH_KEY=...
 ```
@@ -161,9 +172,9 @@ Uses `ctrl-events` and aggregates job lifecycle events (best effort). Make clear
 
 ## References (Use as needed)
 
-- OpenAPI spec provided by user: `/Users/alp/Downloads/supervaize (v1).yaml`
-- MCP server implementation: `/Volumes/SSDext1TB/Documents/GitRepo/SUPERVAIZE/studio/apps/sv_entities/mcp_server.py`
-- MCP HTTP endpoint: `/Volumes/SSDext1TB/Documents/GitRepo/SUPERVAIZE/studio/apps/sv_entities/views/mcp_api.py`
+- **REST paths and MCP tool args**: [reference.md](reference.md) in this skill folder.
+- **Studio documentation**: [Workspace API](https://github.com/supervaize/studio/blob/main/Documentation/workspace_api.md) in the Supervaize Studio repo.
+- OpenAPI: `{base_url}/api/doc`, `{base_url}/api/doc/swagger-ui/`, `{base_url}/api/doc/redoc/`
 
 ## Output Style
 
