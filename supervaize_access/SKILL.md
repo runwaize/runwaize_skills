@@ -1,7 +1,7 @@
 ---
 name: supervaize_access
 version: "1.0.0"
-description: For Supervaize users: use when a chatbot/CLI/IDE agent should interact with a Supervaize workspace (register with API key, create/manage missions and agents, inspect cases/steps, human-in-the-loop) via the Supervaize REST API and/or MCP server. Includes a helper CLI that maps natural-language commands to REST/MCP/controller calls.
+description: For Supervaize users: use when a chatbot/CLI/IDE agent should interact with a Supervaize workspace (register with API key, create/manage missions and agents, inspect cases/steps, human-in-the-loop) via the Supervaize REST API and/or MCP server. Includes a helper CLI that maps natural-language commands to REST and MCP calls.
 ---
 
 # Supervaize Access
@@ -10,10 +10,7 @@ description: For Supervaize users: use when a chatbot/CLI/IDE agent should inter
 
 Use this skill when the user wants a chatbot or IDE agent to **operate against an existing Supervaize workspace**.
 
-This is a **separate skill** from `supervaizer_integration`.
-
-- `supervaizer_integration` = add Supervaizer controller instrumentation to a custom Python agent
-- `supervaize_access` = use Supervaize APIs/MCP from a chatbot/IDE after credentials/workspace are known
+This is a **separate skill** from `supervaizer_integration` (which adds Supervaizer instrumentation to a custom agent). This skill uses **REST API and MCP only** from a chatbot/IDE after credentials/workspace are known.
 
 ## REST and MCP (Studio URLs and permissions)
 
@@ -28,21 +25,19 @@ Map the user's phrases to helper commands:
 
 - "Register to supervaize" -> `register-to-supervaize`
 - "Create a mission" -> `create-mission`
-- "Start a job" -> `start-job`
+- "Start a job" -> `start-job` (returns limitation: job start not exposed via REST/MCP)
 - "View case(s) / step(s)" -> `view-cases-steps`
 - "Show the missions for this agent" -> `show-missions-for-agent`
 - "What is the status of the jobs for this agent" -> `job-status-for-agent`
 
 ## Backends and Limits (Important)
 
-The helper supports **three backends** because no single surface exposes everything:
+The helper uses **REST API and MCP only**:
 
-1. Supervaize SaaS REST API (OpenAPI / attached YAML)
-   - Works for teams, agents, missions, and controller events (`ctrl-events`)
-2. Supervaize MCP HTTP endpoint (`{base_url}/api/mcp/` — root-level, no team in path)
-   - Works for MCP tools like `get_case_status`, `report_case_start`, `report_case_step`, `request_human_input`, `report_case_status`, `register_agent_parameters`
-3. Supervaizer controller (optional)
-   - Needed for actual generic `start-job` (`POST /job/start`)
+1. **Supervaize SaaS REST API** (OpenAPI / attached YAML)
+   - Teams, agents, missions, controller events (`ctrl-events`)
+2. **Supervaize MCP HTTP endpoint** (`{base_url}/api/mcp/` — root-level, no team in path)
+   - Tools: `get_case_status`, `report_case_start`, `report_case_step`, `request_human_input`, `report_case_status`, `register_agent_parameters`
 
 Current public API limitation (from the provided OpenAPI YAML):
 
@@ -60,14 +55,7 @@ export SUPERVAIZE_WORKSPACE_ID=team_1
 export SUPERVAIZE_API_URL=https://app.supervaize.com
 ```
 
-Optional (for MCP / controller flows):
-
-```bash
-# MCP is at root; no /w/team_slug in path
-export SUPERVAIZE_MCP_URL=https://app.supervaize.com/api/mcp
-export SUPERVAIZE_CONTROLLER_URL=http://127.0.0.1:8000
-export CONTROLLER_AUTH_KEY=...
-```
+MCP URL is derived from `SUPERVAIZE_API_URL` when needed (`{api_url}/api/mcp`).
 
 ## Helper CLI (Typer)
 
@@ -87,8 +75,6 @@ Before running commands, ask only the missing items:
 
 - Which workspace/team slug (`SUPERVAIZE_WORKSPACE_ID`) should I use?
 - Do you have a Supervaize API key (`SUPERVAIZE_API_KEY`) already?
-- Are we using SaaS REST API, MCP endpoint, controller, or a combination?
-- For `start-job`: do you have a controller URL (`/job/start`) and controller auth key?
 - For `view case(s)/step(s)`: do you have a `job_id`, `case_id`, or n8n `execution_id`?
 - For agent-specific queries: what is the `agent_slug` (preferred) or `agent_id`?
 
@@ -109,16 +95,6 @@ python scripts/supervaize_access_helper.py create-mission \
   --name "Outbound Follow-up" \
   --description "Q1 sales follow-up campaign" \
   --status draft \
-  --pretty
-```
-
-```bash
-python scripts/supervaize_access_helper.py start-job \
-  --backend controller \
-  --agent-name my_agent \
-  --agent-method start \
-  --user-id cli-user \
-  --params-json '{"fields":{"prompt":"Hello"}}' \
   --pretty
 ```
 
@@ -148,9 +124,7 @@ Creates a mission through the SaaS REST API.
 
 ### `start-job`
 
-Use `--backend controller` for real job starts.
-
-If the user only provides SaaS REST API / MCP access, explain that the current public OpenAPI spec and MCP tools do not expose a generic job-start endpoint.
+Returns a structured limitation: job start is not exposed via public REST or MCP. Suggest Studio UI or Supervaizer (supervaizer_integration skill) for starting jobs.
 
 ### `view-cases-steps`
 

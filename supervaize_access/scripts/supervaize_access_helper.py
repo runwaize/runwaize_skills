@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Chatbot access helper for interacting with Supervaize SaaS via REST, MCP, and optional controller."""
+"""Chatbot access helper for interacting with Supervaize SaaS via REST API and MCP."""
 
 from __future__ import annotations
 
@@ -22,24 +22,18 @@ DEFAULT_EVENT_LIMIT = 200
 ENV_SAAS_API_KEY = "SUPERVAIZE_API_KEY"
 ENV_SAAS_WORKSPACE = "SUPERVAIZE_WORKSPACE_ID"
 ENV_SAAS_API_URL = "SUPERVAIZE_API_URL"
-ENV_MCP_URL = "SUPERVAIZE_MCP_URL"
-ENV_CONTROLLER_URL = "SUPERVAIZE_CONTROLLER_URL"
-ENV_CONTROLLER_AUTH_KEY = "CONTROLLER_AUTH_KEY"
 
 ALL_ENV_VARS = (
     ENV_SAAS_API_KEY,
     ENV_SAAS_WORKSPACE,
     ENV_SAAS_API_URL,
-    ENV_MCP_URL,
-    ENV_CONTROLLER_URL,
-    ENV_CONTROLLER_AUTH_KEY,
 )
 
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
     context_settings={"help_option_names": ["-h", "--help"]},
-    help="Supervaize SaaS access helper for chatbots (REST + MCP + optional controller).",
+    help="Supervaize SaaS access helper for chatbots (REST API + MCP).",
 )
 
 
@@ -107,6 +101,11 @@ def _resolve_value(arg_value: str | None, env_name: str, profile: dict[str, Any]
     return arg_value or os.getenv(env_name) or _profile_value(profile, profile_key)
 
 
+def _resolve_value_arg_profile_only(arg_value: str | None, profile: dict[str, Any], profile_key: str) -> str | None:
+    """Resolve from CLI arg or profile only (no env). Used for MCP URL."""
+    return arg_value or _profile_value(profile, profile_key)
+
+
 def _resolve_access_config(
     *,
     profile_path: str | None,
@@ -114,8 +113,6 @@ def _resolve_access_config(
     workspace_id: str | None = None,
     api_url: str | None = None,
     mcp_url: str | None = None,
-    controller_url: str | None = None,
-    controller_auth_key: str | None = None,
 ) -> dict[str, Any]:
     profile = _load_profile(profile_path)
     cfg = {
@@ -124,18 +121,14 @@ def _resolve_access_config(
         "api_key": _resolve_value(api_key, ENV_SAAS_API_KEY, profile, "api_key"),
         "workspace_id": _resolve_value(workspace_id, ENV_SAAS_WORKSPACE, profile, "workspace_id"),
         "api_url": _resolve_value(api_url, ENV_SAAS_API_URL, profile, "api_url"),
-        "mcp_url": _resolve_value(mcp_url, ENV_MCP_URL, profile, "mcp_url"),
-        "controller_url": _resolve_value(controller_url, ENV_CONTROLLER_URL, profile, "controller_url"),
-        "controller_auth_key": _resolve_value(controller_auth_key, ENV_CONTROLLER_AUTH_KEY, profile, "controller_auth_key")
-        or os.getenv("SUPERVAIZE_CONTROLLER_AUTH_KEY")
-        or os.getenv("SUPERVAIZER_CONTROLLER_AUTH_KEY"),
+        "mcp_url": _resolve_value_arg_profile_only(mcp_url, profile, "mcp_url"),
     }
     if cfg["api_url"]:
         cfg["api_url"] = _normalize_url(str(cfg["api_url"]))
     if cfg["mcp_url"]:
         cfg["mcp_url"] = _normalize_url(str(cfg["mcp_url"]))
-    if cfg["controller_url"]:
-        cfg["controller_url"] = _normalize_url(str(cfg["controller_url"]))
+    elif cfg["api_url"]:
+        cfg["mcp_url"] = _normalize_url(cfg["api_url"]) + "/api/mcp"
     return cfg
 
 
@@ -147,12 +140,9 @@ def _require_saas(cfg: dict[str, Any]) -> None:
 
 def _require_mcp(cfg: dict[str, Any]) -> None:
     if not cfg.get("mcp_url"):
-        raise ValueError("Missing MCP URL. Set --mcp-url or SUPERVAIZE_MCP_URL or register profile.")
-
-
-def _require_controller(cfg: dict[str, Any]) -> None:
-    if not cfg.get("controller_url"):
-        raise ValueError("Missing controller URL. Set --controller-url or SUPERVAIZE_CONTROLLER_URL or register profile.")
+        raise ValueError(
+            "Missing MCP URL. Set --mcp-url or register profile; or set api_url so MCP URL is derived as api_url/api/mcp."
+        )
 
 
 def _http_json(
@@ -195,13 +185,6 @@ def _api_headers(api_key: str, workspace_id: str | None = None) -> dict[str, str
     }
     if workspace_id:
         headers["workspace"] = workspace_id
-    return headers
-
-
-def _controller_headers(api_key: str | None) -> dict[str, str]:
-    headers = {"Accept": "application/json", "Content-Type": "application/json"}
-    if api_key:
-        headers["X-API-Key"] = api_key
     return headers
 
 
@@ -330,9 +313,7 @@ def _questions_payload() -> dict[str, Any]:
         "operation": "questions",
         "questions": [
             "Which Supervaize workspace/team slug should I use?",
-            "Do you want SaaS REST API only, MCP only, controller, or a combination?",
             "Do you already have SUPERVAIZE_API_KEY / SUPERVAIZE_API_URL?",
-            "For start-job: do you have a Supervaizer controller URL and auth key?",
             "For case/step viewing: do you have a job_id, case_id, or n8n execution_id?",
             "For agent-specific queries: what is the agent_slug (preferred)?",
         ],
@@ -347,11 +328,6 @@ def _env_status_impl(profile_path: str | None, shell_template: bool, pretty: boo
                     'export SUPERVAIZE_API_KEY="..."',
                     'export SUPERVAIZE_WORKSPACE_ID="team_1"',
                     'export SUPERVAIZE_API_URL="https://app.supervaize.com"',
-                    "",
-                    "# Optional backends",
-                    'export SUPERVAIZE_MCP_URL="https://app.supervaize.com/w/team_1/api/mcp"',
-                    'export SUPERVAIZE_CONTROLLER_URL="http://127.0.0.1:8000"',
-                    'export CONTROLLER_AUTH_KEY="..."',
                 ]
             )
             + "\n"
@@ -370,8 +346,6 @@ def _env_status_impl(profile_path: str | None, shell_template: bool, pretty: boo
                 "workspace_id": cfg.get("workspace_id"),
                 "api_url": cfg.get("api_url"),
                 "mcp_url": cfg.get("mcp_url"),
-                "controller_url": cfg.get("controller_url"),
-                "controller_auth_key": _mask_secret(cfg.get("controller_auth_key")),
             },
         },
         pretty=pretty,
@@ -384,8 +358,6 @@ def _register_to_supervaize_impl(
     workspace_id: str | None,
     api_url: str | None,
     mcp_url: str | None,
-    controller_url: str | None,
-    controller_auth_key: str | None,
     save_profile: bool,
     timeout_seconds: int,
     page_limit: int,
@@ -397,8 +369,6 @@ def _register_to_supervaize_impl(
         workspace_id=workspace_id,
         api_url=api_url,
         mcp_url=mcp_url,
-        controller_url=controller_url,
-        controller_auth_key=controller_auth_key,
     )
     _require_saas(cfg)
 
@@ -431,8 +401,6 @@ def _register_to_supervaize_impl(
                 "workspace_id": cfg.get("workspace_id"),
                 "api_url": cfg.get("api_url"),
                 "mcp_url": cfg.get("mcp_url"),
-                "controller_url": cfg.get("controller_url"),
-                "controller_auth_key": cfg.get("controller_auth_key"),
             },
         )
 
@@ -1051,87 +1019,19 @@ def _job_status_for_agent_impl(
     )
 
 
-def _start_job_impl(
-    profile_path: str | None,
-    backend: str,
-    controller_url: str | None,
-    controller_api_key: str | None,
-    agent_name: str | None,
-    agent_method: str | None,
-    user_id: str | None,
-    route: str,
-    job_id: str | None,
-    params_json: str | None,
-    params_file: str | None,
-    timeout_seconds: int,
-    dry_run: bool,
-    pretty: bool,
-) -> None:
-    cfg = _resolve_access_config(profile_path=profile_path, controller_url=controller_url, controller_auth_key=controller_api_key)
-    mode = backend.lower().strip()
-    if mode != "controller":
-        _print_json(
-            {
-                "ok": False,
-                "operation": "start-job",
-                "backend": mode,
-                "limitation": {
-                    "reason": "Current public Supervaize OpenAPI and MCP surfaces (provided here) do not expose a generic job-start command.",
-                    "supported_backend": "controller",
-                    "supported_route": "/job/start",
-                    "suggestions": [
-                        "Provide SUPERVAIZE_CONTROLLER_URL and CONTROLLER_AUTH_KEY, then use --backend controller.",
-                        "If you only need telemetry, emit controller events via /ctrl-events (not a real job start).",
-                    ],
-                },
-            },
-            pretty=pretty,
-        )
-        return
-
-    _require_controller(cfg)
-    if not agent_name or not agent_method or not user_id:
-        raise ValueError("--agent-name, --agent-method, and --user-id are required for --backend controller")
-    params = _load_params(params_json, params_file)
-    payload = {
-        "agent_name": agent_name,
-        "agent_method": agent_method,
-        "user_id": user_id,
-        "params": params,
-        "job_id": job_id or str(uuid.uuid4()),
-    }
-    route_path = route if route.startswith("/") else f"/{route}"
-    endpoint = f"{cfg['controller_url']}{route_path}"
-    if dry_run:
-        _print_json(
-            {
-                "ok": True,
-                "operation": "start-job",
-                "backend": "controller",
-                "dry_run": True,
-                "endpoint": endpoint,
-                "headers": {"X-API-Key": "***" if cfg.get("controller_auth_key") else None},
-                "payload": payload,
-            },
-            pretty=pretty,
-        )
-        return
-    status_code, response = _http_json(
-        "POST",
-        endpoint,
-        body=payload,
-        headers=_controller_headers(cfg.get("controller_auth_key")),
-        timeout=timeout_seconds,
-    )
+def _start_job_impl(pretty: bool) -> None:
+    """Job start is not exposed via public REST or MCP; return structured limitation."""
     _print_json(
         {
-            "ok": True,
+            "ok": False,
             "operation": "start-job",
-            "backend": "controller",
-            "endpoint": endpoint,
-            "status_code": status_code,
-            "request": payload,
-            "response": response,
+            "limitation": {
+                "reason": "Current public Supervaize REST API and MCP do not expose a generic job-start command.",
+                "suggestions": [
+                    "Start jobs via the Studio UI or via a Supervaizer (use supervaizer_integration skill for agent-side).",
+                    "For telemetry only, emit controller events to Studio via /ctrl-events.",
+                ],
+            },
         },
         pretty=pretty,
     )
@@ -1207,8 +1107,6 @@ def register_to_supervaize(
     workspace_id: str | None = typer.Option(None, "--workspace-id", help="Workspace/team slug (or use SUPERVAIZE_WORKSPACE_ID)."),
     api_url: str | None = typer.Option(None, "--api-url", help="Base API URL (or use SUPERVAIZE_API_URL)."),
     mcp_url: str | None = typer.Option(None, "--mcp-url", help="Optional MCP HTTP endpoint to save in profile."),
-    controller_url: str | None = typer.Option(None, "--controller-url", help="Optional Supervaizer controller base URL to save in profile."),
-    controller_auth_key: str | None = typer.Option(None, "--controller-auth-key", help="Optional controller auth key to save in profile."),
     save_profile: bool = typer.Option(True, "--save-profile/--no-save-profile", help="Persist resolved values for future commands."),
     timeout_seconds: int = typer.Option(DEFAULT_TIMEOUT, "--timeout-seconds", help="HTTP timeout in seconds."),
     page_limit: int = typer.Option(DEFAULT_PAGE_LIMIT, "--page-limit", help="Max pages to scan when validating workspace/team access."),
@@ -1223,8 +1121,6 @@ def register_to_supervaize(
         workspace_id,
         api_url,
         mcp_url,
-        controller_url,
-        controller_auth_key,
         save_profile,
         timeout_seconds,
         page_limit,
@@ -1405,40 +1301,10 @@ def view_cases_steps(
 
 @app.command("start-job")
 def start_job(
-    backend: str = typer.Option("controller", "--backend", help="controller (real start), api, or mcp"),
-    profile_path: str | None = typer.Option(None, "--profile-path"),
-    controller_url: str | None = typer.Option(None, "--controller-url", help="Supervaizer controller base URL."),
-    controller_api_key: str | None = typer.Option(None, "--controller-api-key", help="Controller auth key (X-API-Key)."),
-    route: str = typer.Option("/job/start", "--route", help="Controller trigger route."),
-    agent_name: str | None = typer.Option(None, "--agent-name"),
-    agent_method: str | None = typer.Option(None, "--agent-method"),
-    user_id: str | None = typer.Option(None, "--user-id"),
-    job_id: str | None = typer.Option(None, "--job-id"),
-    params_json: str | None = typer.Option(None, "--params-json", help="JSON object for JobRequest.params"),
-    params_file: str | None = typer.Option(None, "--params-file", help="Path to JSON file for JobRequest.params"),
-    timeout_seconds: int = typer.Option(DEFAULT_TIMEOUT, "--timeout-seconds"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print request payload without sending."),
     pretty: bool = typer.Option(False, "--pretty"),
 ) -> None:
-    """Start a job (controller backend supported; REST/MCP return structured limitation)."""
-    _handle(
-        pretty,
-        _start_job_impl,
-        profile_path,
-        backend,
-        controller_url,
-        controller_api_key,
-        agent_name,
-        agent_method,
-        user_id,
-        route,
-        job_id,
-        params_json,
-        params_file,
-        timeout_seconds,
-        dry_run,
-        pretty,
-    )
+    """Job start is not exposed via REST/MCP; returns structured limitation and suggestions."""
+    _start_job_impl(pretty=pretty)
 
 
 @app.command("mcp-tools")
