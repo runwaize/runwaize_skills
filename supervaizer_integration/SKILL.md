@@ -624,6 +624,97 @@ CaseNodeUpdate(
 - `ERROR` — Error state
 - `INFO` — Informational display
 
+### DataResource
+
+Declares a named data endpoint the SDK auto-generates as FastAPI CRUD routes. Studio discovers declared resources at registration time and renders a generic table — no per-resource UI code required.
+
+```python
+from supervaizer import DataResource, DataResourceField, Editable
+
+# Writable resource with bulk import support
+contacts_resource = DataResource(
+    name="contacts",             # /agents/{slug}/data/contacts/
+    display_name="Contacts",
+    fields=[
+        DataResourceField(name="id", editable=Editable.NEVER, visible_on=["list", "detail"]),
+        DataResourceField(name="first_name", required=True),
+        DataResourceField(name="email", field_type="email"),
+    ],
+    on_list=lambda: repo.list_all(),
+    on_get=lambda id: repo.get(id),
+    on_create=lambda data: repo.create(data),   # must return dict with "id"
+    on_update=lambda id, data: repo.update(id, data),
+    on_delete=lambda id: repo.delete(id),       # must return bool
+    importable=True,
+    on_import=lambda rows: repo.bulk_import(rows),
+)
+
+# Read-only resource (no create/update/delete routes generated)
+prompts_resource = DataResource(
+    name="prompts",
+    read_only=True,
+    fields=[DataResourceField(name="slug", editable=Editable.NEVER)],
+    on_list=lambda: repo.list_filtered(),
+)
+
+agent = Agent(..., data_resources=[contacts_resource, prompts_resource])
+```
+
+**Generated routes** (all require `X-API-Key` header):
+```
+GET    /supervaizer/agents/{slug}/data/{resource}/           list
+GET    /supervaizer/agents/{slug}/data/{resource}/{id}       get
+POST   /supervaizer/agents/{slug}/data/{resource}/           create
+PUT    /supervaizer/agents/{slug}/data/{resource}/{id}       update
+DELETE /supervaizer/agents/{slug}/data/{resource}/{id}       delete
+POST   /supervaizer/agents/{slug}/data/{resource}/import/    bulk import
+```
+
+**`Editable` values:**
+| Value | Meaning |
+|-------|---------|
+| `Editable.ALWAYS` (default) | Shown on create and edit forms |
+| `Editable.CREATE_ONLY` | Set at creation; shown read-only on edit |
+| `Editable.NEVER` | Never in a form (e.g. auto-generated IDs, timestamps) |
+
+**`field_type` values:** `string` (default), `integer`, `boolean`, `date`, `datetime`, `text`, `email`, `url`
+
+**FK relationship:** Set `related_resource="other_resource_name"` to declare a foreign key — Studio will link to the related resource's detail view.
+
+**Full working example:** `supervaize_hello_world/agent_data_resource.py` (in-memory contacts store with all operations + import).
+
+### Job and Case metadata
+
+Pass arbitrary domain data to Studio via `metadata={}` on `Job.new()` and `Case.start()`. Studio renders it as a read-only key/value panel on the Job/Case detail page.
+
+```python
+# In job_start — attach domain context to the job
+job = Job.new(
+    job_context=JobContext(workspace_id=workspace_id, job_id=campaign_id),
+    agent_name="my-agent",
+    metadata={
+        "campaign_id": "c-001",
+        "scenario": "hr_screening",
+        "phase": "interviews",
+    },
+)
+
+# In case processing — attach per-item context
+case = Case.start(
+    job_id=job_id,
+    account=account,
+    name=contact.full_name,
+    description="...",
+    metadata={
+        "contact_id": str(contact.id),
+        "email": contact.email,
+        "language": contact.language,
+    },
+)
+```
+
+The `metadata` dict flows through `registration_info` → Studio event processing → stored on the Job/Case Django model. It is displayed but not editable from Studio.
+
 ### Human-in-the-Loop Pattern
 
 Request human input during case processing:
