@@ -32,6 +32,12 @@ Use these as real-world pattern references when reasoning about the mapping:
   - `sv_main.py` — workflow adapter bridging Supervaize fields to LangGraph
   - Pattern: single case per email, steps for filter → summarize → respond
 
+- **Hello World + DataResource** (in-memory contacts CRUD): `supervaize_hello_world/` in the RUNWAIZE repo
+  - `supervaizer_control.py` — controller with `data_resources=[contacts_resource]` registration
+  - `agent_data_resource.py` — in-memory contacts store, full DataResource declaration with all operations
+  - `tests/test_data_resource_e2e.py` — TestClient E2E tests covering list/get/create/update/delete/import/auth
+  - Pattern: simplest possible DataResource — no DB, all in-memory, ideal for learning the API
+
 ## Instructions
 
 Follow these phases in order. Each phase must complete before moving to the next.
