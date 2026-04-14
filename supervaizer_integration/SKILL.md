@@ -114,6 +114,20 @@ Ask the user the following questions using `AskUserQuestion`. Pre-fill suggested
 - "What inputs should the user provide when starting a job?" (detect from the agent's main function parameters or CLI arguments)
 - For each field: name, type (CharField, IntegerField, BooleanField, ChoiceField, etc.), required (yes/no), description
 
+**Question Set 7 - Data Resources:**
+- "Does your agent own data that Studio users should be able to view or manage?" (e.g. contacts, interview records, prompts, knowledge bases)
+- For each data type the agent owns:
+  - Resource name (URL-safe, e.g. `contacts`)
+  - Display name for Studio (e.g. `Contacts`)
+  - Is it read-only in Studio, or should Studio users be able to create/edit/delete?
+  - Should Studio users be able to bulk-import records via CSV?
+- For each field in each resource:
+  - Name and type (string/integer/email/datetime/text/boolean/url)
+  - Editable? `ALWAYS` (default), `CREATE_ONLY` (set at creation, read-only after), or `NEVER` (agent-controlled, never in a form)
+  - Required on create?
+  - Visible on which views? (list, detail, create, edit)
+  - FK reference to another resource? (e.g. `contact_id` → `contacts`)
+
 ### Phase 3: Install Supervaizer Package
 
 1. **Detect the package manager** and install accordingly:
