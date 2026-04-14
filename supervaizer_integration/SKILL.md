@@ -178,6 +178,9 @@ from supervaizer import (
     CaseNodeType,
     ParametersSetup,
     Parameter,
+    DataResource,        # expose agent-owned data to Studio
+    DataResourceField,   # describe field schema for each resource
+    Editable,            # ALWAYS | CREATE_ONLY | NEVER
 )
 
 # === PARAMETERS ===
@@ -185,6 +188,51 @@ from supervaizer import (
 agent_parameters = ParametersSetup.from_list([
     Parameter(name="...", description="...", is_environment=True, is_secret=True),
 ])
+
+# === DATA RESOURCES (optional) ===
+# Declare any data your agent owns that Studio users should be able to view/manage.
+# Delete this section if your agent has no domain data to expose.
+#
+# Pattern reference: supervaize_hello_world/agent_data_resource.py
+#   - In-memory contacts store with full CRUD + bulk import
+#   - See also: supervaize_hello_world/supervaizer_control.py (registration)
+#
+# Replace the lambda bodies with calls to your actual DB repository.
+#
+# contacts_resource = DataResource(
+#     name="contacts",              # URL slug: /agents/{slug}/data/contacts/
+#     display_name="Contacts",
+#     description="...",
+#     fields=[
+#         DataResourceField(
+#             name="id",
+#             editable=Editable.NEVER,
+#             visible_on=["list", "detail"],
+#         ),
+#         DataResourceField(name="first_name", required=True),
+#         DataResourceField(name="email", field_type="email"),
+#         # DataResourceField(
+#         #     name="group_id",
+#         #     related_resource="groups",   # FK to another resource
+#         #     editable=Editable.CREATE_ONLY,
+#         # ),
+#     ],
+#     on_list=lambda: [],                          # Required
+#     on_get=lambda id: None,                      # Optional
+#     on_create=lambda data: {**data, "id": "1"},  # Required if not read_only
+#     on_update=lambda id, data: data,             # Optional
+#     on_delete=lambda id: True,                   # Optional
+#     importable=True,                             # Adds POST /import/ route
+#     on_import=lambda rows: {"created": len(rows)},  # Required if importable
+# )
+#
+# Read-only example (prompts, config, lookup tables):
+# prompts_resource = DataResource(
+#     name="prompts",
+#     read_only=True,              # No create/update/delete routes generated
+#     fields=[DataResourceField(name="slug", editable=Editable.NEVER), ...],
+#     on_list=lambda: [],
+# )
 
 # === STEP NODES ===
 # Declared step flow for the job_start method (from Question Set 2)
@@ -248,6 +296,7 @@ agent = Agent(
         # human_answer=human_answer_method,  # If HITL enabled
     ),
     parameters_setup=agent_parameters,
+    # data_resources=[contacts_resource],   # ← uncomment when using DataResources
 )
 
 # === ACCOUNT ===
