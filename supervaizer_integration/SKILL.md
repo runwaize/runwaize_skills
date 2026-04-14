@@ -187,6 +187,7 @@ from supervaizer import (
     DataResource,        # expose agent-owned data to Studio
     DataResourceField,   # describe field schema for each resource
     Editable,            # ALWAYS | CREATE_ONLY | NEVER
+    FieldType,           # string | integer | boolean | date | datetime | text | email | url
 )
 
 # === PARAMETERS ===
@@ -398,7 +399,7 @@ def job_start(**kwargs) -> JobResponse | None:
     cost = 0.0
 
     # Extract items to process from fields
-    # items = parse_items(job_fields.get("input_field"))
+    items = []  # replace with: parse_items(job_fields.get("input_field"))
 
     for i, item in enumerate(items):
         # Check job instructions (max_cases, max_cost, stop_on_error)
@@ -684,6 +685,8 @@ POST   /supervaizer/agents/{slug}/data/{resource}/import/    bulk import
 | `Editable.NEVER` | Never in a form (e.g. auto-generated IDs, timestamps) |
 
 **`field_type` values:** `string` (default), `integer`, `boolean`, `date`, `datetime`, `text`, `email`, `url`
+
+You can also use the `FieldType` enum for IDE autocompletion: `FieldType.STRING`, `FieldType.EMAIL`, etc.
 
 **FK relationship:** Set `related_resource="other_resource_name"` to declare a foreign key — Studio will link to the related resource's detail view.
 
