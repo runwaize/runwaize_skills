@@ -797,9 +797,10 @@ def _render_sv_main_py(spec: dict[str, Any], controller_filename: str, workflow_
 
         def _emit_case_step(case: Case, step_id: str, step_name: str, payload: dict[str, Any] | None = None) -> None:
             case.update(
-                CaseNodeUpdate(
-                    name=step_name,
+                all_steps_start_method.make_update(
+                    step_id,
                     payload={{
+                        "step_name": step_name,
                         "step_id": step_id,
                         **(payload or {{}}),
                     }},

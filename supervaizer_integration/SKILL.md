@@ -185,6 +185,7 @@ from supervaizer import (
     ParametersSetup,
     Parameter,
     DataResource,        # expose agent-owned data to Studio
+    DataResourceContext, # tenant/workspace context for resource callbacks
     DataResourceField,   # describe field schema for each resource
     Editable,            # ALWAYS | CREATE_ONLY | NEVER
     FieldType,           # string | integer | boolean | date | datetime | text | email | url
@@ -204,10 +205,14 @@ agent_parameters = ParametersSetup.from_list([
 #   - In-memory contacts store with full CRUD + bulk import
 #   - See also: supervaize_hello_world/supervaizer_control.py (registration)
 #
-# Replace the lambda bodies with calls to your actual DB repository.
+# Replace the function bodies with calls to your actual DB repository.
+#
+# def list_contacts(*, context: DataResourceContext):
+#     tenant_id = tenant_from_workspace_slug(context.workspace_slug)
+#     return contacts_repo.list_by_tenant(tenant_id)
 #
 # contacts_resource = DataResource(
-#     name="contacts",              # URL slug: /agents/{slug}/data/contacts/
+#     name="contacts",              # URL slug: /api/agents/{slug}/data/contacts/
 #     display_name="Contacts",
 #     description="...",
 #     fields=[
@@ -217,14 +222,14 @@ agent_parameters = ParametersSetup.from_list([
 #             visible_on=["list", "detail"],
 #         ),
 #         DataResourceField(name="first_name", required=True),
-#         DataResourceField(name="email", field_type="email"),
+#         DataResourceField(name="email", field_type=FieldType.EMAIL, sensitive=True),
 #         # DataResourceField(
 #         #     name="group_id",
 #         #     related_resource="groups",   # FK to another resource
 #         #     editable=Editable.CREATE_ONLY,
 #         # ),
 #     ],
-#     on_list=lambda: [],                          # Required
+#     on_list=list_contacts,                       # Required
 #     on_get=lambda id: None,                      # Optional
 #     on_create=lambda data: {**data, "id": "1"},  # Required if not read_only
 #     on_update=lambda id, data: data,             # Optional
@@ -636,18 +641,23 @@ CaseNodeUpdate(
 Declares a named data endpoint the SDK auto-generates as FastAPI CRUD routes. Studio discovers declared resources at registration time and renders a generic table — no per-resource UI code required.
 
 ```python
-from supervaizer import DataResource, DataResourceField, Editable
+from supervaizer import DataResource, DataResourceContext, DataResourceField, Editable, FieldType
+
+
+def list_contacts(*, context: DataResourceContext):
+    tenant_id = tenant_from_workspace_slug(context.workspace_slug)
+    return repo.list_by_tenant(tenant_id)
 
 # Writable resource with bulk import support
 contacts_resource = DataResource(
-    name="contacts",             # /agents/{slug}/data/contacts/
+    name="contacts",             # /api/agents/{slug}/data/contacts/
     display_name="Contacts",
     fields=[
         DataResourceField(name="id", editable=Editable.NEVER, visible_on=["list", "detail"]),
         DataResourceField(name="first_name", required=True),
-        DataResourceField(name="email", field_type="email"),
+        DataResourceField(name="email", field_type=FieldType.EMAIL, sensitive=True),
     ],
-    on_list=lambda: repo.list_all(),
+    on_list=list_contacts,
     on_get=lambda id: repo.get(id),
     on_create=lambda data: repo.create(data),   # must return dict with "id"
     on_update=lambda id, data: repo.update(id, data),
@@ -669,13 +679,17 @@ agent = Agent(..., data_resources=[contacts_resource, prompts_resource])
 
 **Generated routes** (all require `X-API-Key` header):
 ```
-GET    /supervaizer/agents/{slug}/data/{resource}/           list
-GET    /supervaizer/agents/{slug}/data/{resource}/{id}       get
-POST   /supervaizer/agents/{slug}/data/{resource}/           create
-PUT    /supervaizer/agents/{slug}/data/{resource}/{id}       update
-DELETE /supervaizer/agents/{slug}/data/{resource}/{id}       delete
-POST   /supervaizer/agents/{slug}/data/{resource}/import/    bulk import
+GET    /api/agents/{slug}/data/{resource}/                   list
+GET    /api/agents/{slug}/data/{resource}/{id}               get
+POST   /api/agents/{slug}/data/{resource}/                   create
+PUT    /api/agents/{slug}/data/{resource}/{id}               update
+DELETE /api/agents/{slug}/data/{resource}/{id}               delete
+POST   /api/agents/{slug}/data/{resource}/import/            bulk import
 ```
+
+Use the `/api/...` routes from the SDK controller contract.
+
+Studio forwards `X-Supervaize-Workspace-Id`, `X-Supervaize-Workspace-Slug`, `X-Supervaize-Mission-Id`, and `X-Supervaize-Request-Id`; tenant-scoped callbacks should resolve from `context.workspace_slug`, filter every list/get, and reject writes/imports whose supplied tenant does not match.
 
 **`Editable` values:**
 | Value | Meaning |
