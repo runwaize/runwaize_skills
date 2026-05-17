@@ -57,6 +57,11 @@ def _slug(value: str) -> str:
     return slug or "value"
 
 
+def _v2_slug(value: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "-", value).strip("-").lower()
+    return slug or "agent"
+
+
 def _module_from_filename(filename: str) -> str:
     return Path(filename).stem
 
@@ -125,24 +130,24 @@ def _http_json(
         raise RuntimeError(json.dumps({"url": url, "error": str(exc.reason)})) from exc
 
 
-def _handle(pretty: bool, fn: Any, *args: Any, **kwargs: Any) -> None:
+def _handle(output_pretty: bool, fn: Any, *args: Any, **kwargs: Any) -> None:
     try:
         fn(*args, **kwargs)
     except json.JSONDecodeError as exc:
-        _print_json({"ok": False, "error": f"Invalid JSON input: {exc.msg}", "position": exc.pos}, pretty=pretty)
+        _print_json({"ok": False, "error": f"Invalid JSON input: {exc.msg}", "position": exc.pos}, pretty=output_pretty)
         raise typer.Exit(code=2)
     except ValueError as exc:
-        _print_json({"ok": False, "error": str(exc)}, pretty=pretty)
+        _print_json({"ok": False, "error": str(exc)}, pretty=output_pretty)
         raise typer.Exit(code=2)
     except RuntimeError as exc:
         try:
             payload = json.loads(str(exc))
         except json.JSONDecodeError:
             payload = {"error": str(exc)}
-        _print_json({"ok": False, **payload}, pretty=pretty)
+        _print_json({"ok": False, **payload}, pretty=output_pretty)
         raise typer.Exit(code=1)
     except Exception as exc:
-        _print_json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, pretty=pretty)
+        _print_json({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, pretty=output_pretty)
         raise typer.Exit(code=1)
 
 
@@ -150,19 +155,19 @@ def _questions_payload() -> dict[str, Any]:
     return {
         "ok": True,
         "operation": "questions",
-        "goal": "Identify the correct Job, Case, and Step boundaries before writing Supervaizer integration code.",
+        "goal": "Design the Supervaizer v2 Job, Case, Step, Resource, Surface, and Action contract before writing controller code.",
         "questions": [
             {
                 "id": "agent_entrypoint",
                 "category": "Target Function",
-                "question": "What Python function should Supervaizer call to start the agent workflow (module path + function)?",
-                "why": "This becomes the `job_start` method target and the wrapper call in `agent_impl.py`.",
+                "question": "What Python function should the v2 `job.start` action call (module path + function)?",
+                "why": "This becomes the target call inside the generated `agent_impl.py` action handler.",
             },
             {
                 "id": "job_definition",
                 "category": "Job Mapping",
                 "question": "What does one invocation represent in business terms (the Job)?",
-                "why": "The Job should match a single user-visible run in Supervaize.",
+                "why": "The Job should match a committed user-visible unit of work in Studio.",
             },
             {
                 "id": "case_definition",
@@ -177,40 +182,52 @@ def _questions_payload() -> dict[str, Any]:
                 "why": "Used to build the case loop in `agent_impl.py`.",
             },
             {
+                "id": "lane_list",
+                "category": "Case Mapping",
+                "question": "Which lanes should Studio render for these Cases? Use `work` by default; add `setup` or `deliverable` only when useful.",
+                "why": "Case.lane is a rendering hint, not an ontology.",
+            },
+            {
                 "id": "step_list",
                 "category": "Flow Mapping",
                 "question": "What are the ordered steps inside each case (fetch, parse, classify, generate, send, review, etc.)?",
-                "why": "These become Supervaizer case nodes and runtime case updates.",
+                "why": "These become v2 Step snapshots with activity/status/awaiting/outputs.",
             },
             {
                 "id": "human_in_the_loop",
                 "category": "Flow Mapping",
                 "question": "Where do humans approve/review/answer? Which steps are HITL?",
-                "why": "HITL steps should use a compatible node type and request/receive human input.",
+                "why": "HITL is represented as a Step with `status=awaiting` and an `awaiting` form submitted through `step.awaiting.submit`.",
             },
             {
                 "id": "start_fields",
-                "category": "UI Fields",
-                "question": "Which user-provided inputs should appear in the Supervaize job start form (fields, types, defaults, required)?",
-                "why": "These become `job_start.fields` in `supervaizer_control.py`.",
+                "category": "A2UI Surface",
+                "question": "Which user-provided inputs should appear in the `job.start` A2UI form?",
+                "why": "These become the document returned by `supervaizer/surface.load` for `job.start`.",
             },
             {
                 "id": "agent_parameters",
                 "category": "Secrets / Env",
                 "question": "Which environment variables/secrets should be requested as agent parameters (API keys, credentials, endpoints)?",
-                "why": "These become `ParametersSetup` and can be injected into env at runtime.",
+                "why": "These become explicit controller requirements or optional Agent parameters; missing required values should fail clearly.",
             },
             {
-                "id": "function_param_mapping",
-                "category": "Function Mapping",
-                "question": "How do `fields` map to the target function parameters (including type conversion)?",
-                "why": "This determines the wrapper call signature and prevents runtime mismatches.",
+                "id": "resources",
+                "category": "Resources",
+                "question": "What agent-owned resources should Studio manage, and which operations are allowed?",
+                "why": "Resources become v2 declarations plus `resource.<id>.<operation>` typed actions.",
             },
             {
-                "id": "result_payload",
+                "id": "datasets_artifacts",
                 "category": "Outputs",
-                "question": "What should the final JobResponse payload contain, and what per-case result should be attached when closing cases?",
-                "why": "Defines the observability/output contract for Supervaize UI and downstream consumers.",
+                "question": "Which datasets, Vega-Lite dashboards, and artifacts should Studio render?",
+                "why": "Agent-owned vocabulary belongs in dataset and artifact declarations, not protocol enums.",
+            },
+            {
+                "id": "sync_source",
+                "category": "Sync",
+                "question": "How should `job.sync` converge Studio state with the agent when status has drifted or a job was created for an existing external run?",
+                "why": "`job.sync` is the v2 status convergence mechanism.",
             },
         ],
     }
@@ -225,11 +242,13 @@ def _spec_template() -> dict[str, Any]:
             "workflow_filename": "agent_impl.py",
         },
         "integration": {
-            "agent_slug": "my_agent",
+            "agent_slug": "my-agent",
             "agent_display_name": "My Agent",
             "agent_description": "Describe the agent's purpose for Supervaize users.",
+            "agent_version": "0.1.0",
+            "a2ui_catalog_version": "my-agent-ui.1",
             "workflow_wrapper_function": "process_my_agent_workflow",
-            "job_start_description": "Describe what the start job does.",
+            "job_start_title": "Start My Agent",
         },
         "target_agent": {
             "module": "my_agent.main",
@@ -246,34 +265,59 @@ def _spec_template() -> dict[str, Any]:
             "case_name_prefix": "Case",
             "case_description_template": "Process one case item",
         },
+        "lanes": [
+            {"id": "work", "label": "Work", "default": True}
+        ],
         "steps": [
             {
                 "id": "prepare",
                 "name": "Prepare Inputs",
                 "description": "Validate and normalize inputs.",
-                "type": "STATUS_UPDATE",
+                "activity": "operation",
+                "status": "completed",
             },
             {
                 "id": "execute",
                 "name": "Run Agent Logic",
                 "description": "Call the existing Python agent function.",
-                "type": "STATUS_UPDATE",
+                "activity": "operation",
+                "status": "completed",
             },
             {
                 "id": "finalize",
                 "name": "Finalize Result",
                 "description": "Prepare final payload and close the case.",
-                "type": "DELIVERABLE",
+                "activity": "operation",
+                "status": "completed",
+                "outputs": [{"id": "result", "type": "result", "title": "Result"}],
             },
         ],
         "start_fields": [
             {
-                "name": "input_text",
-                "type": "str",
-                "field_type": "CharField",
+                "id": "input_text",
+                "label": "Input text",
+                "type": "string",
                 "required": True,
                 "description": "Primary user input",
             }
+        ],
+        "resources": [
+            {
+                "id": "items",
+                "label": "Items",
+                "auto_surface": True,
+                "scope": "workspace",
+                "requires_context": ["workspace.slug"],
+                "operations": ["list"],
+                "fields": [
+                    {"id": "id", "label": "ID", "type": "string", "required": True},
+                    {"id": "name", "label": "Name", "type": "string", "required": True},
+                ],
+            }
+        ],
+        "datasets": [],
+        "artifact_types": [
+            {"id": "result", "label": "Result"}
         ],
         "agent_parameters": [
             {
@@ -289,7 +333,7 @@ def _spec_template() -> dict[str, Any]:
             "api_url_env": "SUPERVAIZE_API_URL",
         },
         "notes": {
-            "job_case_step_mapping": "Replace with your concrete mapping before scaffolding.",
+            "job_case_step_mapping": "Replace with your concrete v2 mapping before scaffolding.",
             "hitl_steps": [],
         },
     }
@@ -300,11 +344,13 @@ def _parse_csv_list(value: str) -> list[str]:
 
 
 def _wizard_impl(output_file: str, pretty: bool) -> None:
-    typer.echo("Supervaizer Integration Wizard (existing Python agent -> Supervaizer controller)")
+    typer.echo("Supervaizer v2 Integration Wizard (existing Python agent -> A2A/A2UI controller)")
     project_name = typer.prompt("Project name", default="my_agent_project")
-    agent_slug = _slug(typer.prompt("Agent slug (machine name)", default="my_agent"))
+    agent_slug = _v2_slug(typer.prompt("Agent slug (Studio/A2A slug)", default="my-agent"))
     agent_display_name = typer.prompt("Agent display name", default=agent_slug.replace("_", " ").title())
     agent_description = typer.prompt("Agent description", default="Existing Python agent integrated with Supervaizer")
+    agent_version = typer.prompt("Agent version", default="0.1.0")
+    a2ui_catalog_version = typer.prompt("A2UI catalog version", default=f"{agent_slug}-ui.1")
 
     target_module = typer.prompt("Target agent module (dotted path)", default=f"{agent_slug}.main")
     target_function = typer.prompt("Target agent function name", default="run_workflow")
@@ -352,21 +398,22 @@ def _wizard_impl(output_file: str, pretty: bool) -> None:
     step_names = _parse_csv_list(steps_csv)
     for idx, step in enumerate(step_names):
         step_id = _slug(step)
-        default_type = "DELIVERABLE" if idx == len(step_names) - 1 else "STATUS_UPDATE"
         steps.append(
             {
                 "id": step_id,
                 "name": step.replace("_", " ").title(),
                 "description": f"{step.replace('_', ' ').title()} step",
-                "type": default_type,
+                "activity": "operation",
+                "status": "completed",
+                "outputs": [{"id": f"{step_id}_output", "type": "result", "title": "Result"}] if idx == len(step_names) - 1 else [],
             }
         )
 
     start_fields = [
         {
-            "name": field,
-            "type": "str",
-            "field_type": "CharField",
+            "id": field,
+            "label": field.replace("_", " ").title(),
+            "type": "string",
             "required": True,
             "description": f"Input field: {field}",
         }
@@ -390,8 +437,10 @@ def _wizard_impl(output_file: str, pretty: bool) -> None:
             "agent_slug": agent_slug,
             "agent_display_name": agent_display_name,
             "agent_description": agent_description,
-            "workflow_wrapper_function": f"process_{agent_slug}_workflow",
-            "job_start_description": job_definition,
+            "agent_version": agent_version,
+            "a2ui_catalog_version": a2ui_catalog_version,
+            "workflow_wrapper_function": f"process_{_slug(agent_slug)}_workflow",
+            "job_start_title": f"Start {agent_display_name}",
         }
     )
     spec["target_agent"].update(
@@ -428,9 +477,9 @@ def _wizard_impl(output_file: str, pretty: bool) -> None:
             "operation": "wizard",
             "spec_file": str(out_path),
             "next_steps": [
-                "Review and edit the generated spec (especially job_mapping, steps, start_fields, and agent_parameters).",
-                "Run analyze-agent on the target project if you need help choosing the target function.",
-                "Run scaffold-integration with this spec to generate supervaizer_control.py and agent_impl.py.",
+            "Review and edit the generated spec (especially job_mapping, steps, start_fields, and agent_parameters).",
+            "Run analyze-agent on the target project if you need help choosing the target function.",
+                "Run scaffold-integration with this spec to generate a v2 supervaizer_control.py and agent_impl.py.",
             ],
             "spec": spec if pretty else None,
         },
@@ -438,110 +487,82 @@ def _wizard_impl(output_file: str, pretty: bool) -> None:
     )
 
 
-def _default_field_type(field_type_name: str) -> str:
-    mapping = {
-        "str": "CharField",
-        "int": "IntegerField",
-        "float": "FloatField",
-        "bool": "BooleanField",
-        "list[str]": "JSONField",
-        "dict": "JSONField",
+def _literal(value: Any) -> str:
+    return repr(value)
+
+
+def _render_a2ui_field(field: dict[str, Any]) -> str:
+    field_id = str(field.get("id") or field.get("name") or "field")
+    payload = {
+        "id": field_id,
+        "label": str(field.get("label") or field_id.replace("_", " ").title()),
+        "type": str(field.get("type") or "string"),
+        "required": bool(field.get("required", False)),
     }
-    return mapping.get(field_type_name, "CharField")
-
-
-def _python_type_expr(type_name: str) -> str:
-    mapping = {
-        "str": "str",
-        "int": "int",
-        "float": "float",
-        "bool": "bool",
-        "dict": "dict",
-        "list": "list",
-        "list[str]": "str",
-    }
-    return mapping.get(type_name, "str")
-
-
-def _render_field_dict(field: dict[str, Any]) -> str:
-    parts: list[str] = []
-    name = field["name"]
-    type_name = str(field.get("type", "str"))
-    field_type = field.get("field_type") or _default_field_type(type_name)
-    parts.append(f'"name": {name!r}')
-    parts.append(f'"type": {_python_type_expr(type_name)}')
-    parts.append(f'"field_type": {field_type!r}')
-    if "description" in field:
-        parts.append(f'"description": {str(field.get("description", ""))!r}')
-    parts.append(f'"required": {bool(field.get("required", False))!r}')
-    if "default" in field and field.get("default") is not None:
-        parts.append(f'"default": {field["default"]!r}')
-    if "choices" in field and field.get("choices"):
-        parts.append(f'"choices": {field["choices"]!r}')
-    return "{" + ", ".join(parts) + "}"
+    if field.get("description"):
+        payload["description"] = str(field["description"])
+    if field.get("default") is not None:
+        payload["default"] = field["default"]
+    if field.get("options"):
+        payload["options"] = field["options"]
+    return repr(payload)
 
 
 def _render_parameter_block(param: dict[str, Any]) -> str:
-    return textwrap.indent(
-        textwrap.dedent(
-            f"""\
-            Parameter(
-                name={param['name']!r},
-                description={str(param.get('description', param['name']))!r},
-                is_environment={bool(param.get('is_environment', True))!r},
-                is_secret={bool(param.get('is_secret', False))!r},
-            ),
-            """
-        ).rstrip(),
-        "    ",
-    )
+    return "\n".join([
+        "    Parameter(",
+        f"                name={param['name']!r},",
+        f"                description={str(param.get('description', param['name']))!r},",
+        f"                is_environment={bool(param.get('is_environment', True))!r},",
+        f"                is_secret={bool(param.get('is_secret', False))!r},",
+        "    ),",
+    ])
 
 
-def _render_step_node(step: dict[str, Any]) -> str:
-    step_id = _slug(str(step["id"]))
-    step_name = str(step.get("name") or step_id.replace("_", " ").title())
-    step_desc = str(step.get("description") or step_name)
-    step_type = str(step.get("type", "STATUS_UPDATE")).upper()
-    return textwrap.indent(
-        textwrap.dedent(
-            f"""\
-            CaseNode(
-                name={step_id!r},
-                description={step_desc!r},
-                type=CaseNodeType.{step_type},
-                factory=lambda **payload: CaseNodeUpdate(
-                    name={step_name!r},
-                    payload=(payload or None),
-                    is_final=False,
-                ),
-            ),
-            """
-        ).rstrip(),
-        "    ",
-    )
+def _render_resource_definition(resource: dict[str, Any]) -> str:
+    return "\n".join([
+        "    V2ResourceDefinition(",
+        f"                id={str(resource.get('id') or 'items')!r},",
+        f"                label={str(resource.get('label') or resource.get('id') or 'Items')!r},",
+        f"                auto_surface={bool(resource.get('auto_surface', True))!r},",
+        f"                scope={str(resource.get('scope') or 'workspace')!r},",
+        f"                requires_context={list(resource.get('requires_context') or ['workspace.slug'])!r},",
+        f"                operations={list(resource.get('operations') or ['list'])!r},",
+        f"                fields={list(resource.get('fields') or [])!r},",
+        "    ),",
+    ])
+
+
+def _render_quoted_list(values: list[str]) -> str:
+    return "[" + ", ".join(repr(value) for value in values) + "]"
+
+
+def _strip_template_indent(source: str) -> str:
+    lines = source.lstrip("\n").splitlines()
+    stripped = [line[8:] if line.startswith("        ") else line for line in lines]
+    return "\n".join(stripped).rstrip() + "\n"
 
 
 def _render_controller_py(spec: dict[str, Any], controller_filename: str, workflow_filename: str) -> str:
     integration = spec["integration"]
     target = spec["target_agent"]
-    project = spec["project"]
     job_mapping = spec["job_mapping"]
-    steps = spec.get("steps", [])
-    start_fields = spec.get("start_fields", [])
     agent_parameters = spec.get("agent_parameters", [])
     envs = spec.get("supervaize_env", {})
+    resources = spec.get("resources", [])
+    datasets = spec.get("datasets", [])
+    artifact_types = spec.get("artifact_types", [])
+    lanes = spec.get("lanes", [{"id": "work", "label": "Work", "default": True}])
 
     workflow_module = _module_from_filename(workflow_filename)
     workflow_fn = integration.get("workflow_wrapper_function", f"process_{_slug(integration['agent_slug'])}_workflow")
-    agent_slug = _slug(integration["agent_slug"])
+    agent_slug = _v2_slug(str(integration["agent_slug"]))
+    agent_display_name = str(integration.get("agent_display_name") or agent_slug.replace("_", " ").title())
+    agent_version = str(integration.get("agent_version") or "0.1.0")
+    a2ui_catalog_version = str(integration.get("a2ui_catalog_version") or f"{agent_slug}-ui.1")
 
     params_block = "\n".join(_render_parameter_block(p) for p in agent_parameters) if agent_parameters else "    # No agent parameters defined yet. Add Parameter(...) entries here."
-    fields_block = (
-        ",\n        ".join(_render_field_dict(f) for f in start_fields)
-        if start_fields
-        else '{"name": "input_text", "type": str, "field_type": "CharField", "required": True, "description": "Primary input"}'
-    )
-    nodes_block = "\n".join(_render_step_node(s) for s in steps) if steps else "    # Add CaseNode(...) definitions for the per-case step flow."
+    resources_block = "\n".join(_render_resource_definition(r) for r in resources) if resources else ""
 
     workspace_env = envs.get("workspace_id_env", "SUPERVAIZE_WORKSPACE_ID")
     api_key_env = envs.get("api_key_env", "SUPERVAIZE_API_KEY")
@@ -549,17 +570,18 @@ def _render_controller_py(spec: dict[str, Any], controller_filename: str, workfl
 
     notes = f"""# Generated by supervaizer_integration helper.
 # Review and customize:
-# - `agent_parameters` (runtime secrets/envs requested by Supervaize)
-# - `job_start_method.fields` (UI form inputs)
-# - `all_steps_start_method` (declared case-step flow)
-# - method target `{workflow_module}.{workflow_fn}` in `{workflow_filename}`
+# - v2 registration resources, datasets, lanes, surfaces, and actions
+# - `agent_parameters` and required controller environment variables
+# - surface/action handlers in `{workflow_filename}`
+# - target function call `{target.get('module')}.{target.get('function')}`
 #
 # Job mapping: {job_mapping.get('job_definition', '')}
 # Case strategy: {job_mapping.get('case_strategy', 'single_case')}
 # Target agent call: {target.get('module')}.{target.get('function')}
 """
 
-    return textwrap.dedent(
+    return _strip_template_indent(
+        textwrap.dedent(
         f"""\
         {notes}
         import os
@@ -567,72 +589,61 @@ def _render_controller_py(spec: dict[str, Any], controller_filename: str, workfl
         from supervaizer import (
             Account,
             Agent,
-            AgentMethod,
-            AgentMethods,
-            CaseNode,
-            CaseNodes,
-            CaseNodeType,
-            CaseNodeUpdate,
             Parameter,
             ParametersSetup,
             Server,
+            V2ResourceDefinition,
+            build_v2_agent_registration,
         )
 
+        from {workflow_module} import handle_v2_action, handle_v2_surface
 
         agent_parameters = ParametersSetup.from_list([
-        {params_block}
+{params_block}
         ])
 
 
-        all_steps_start_method = CaseNodes(nodes=[
-        {nodes_block}
-        ])
+        def require_env(name: str) -> str:
+            value = os.getenv(name)
+            if not value:
+                raise RuntimeError(f"Missing required environment variable: {{name}}")
+            return value
 
 
-        job_start_method = AgentMethod(
-            name="start",
-            method={f"{workflow_module}.{workflow_fn}"!r},
-            is_async=False,
-            params={{}},
-            nodes=all_steps_start_method,
-            fields=[
-                {fields_block}
-            ],
-            description={repr(str(integration.get('job_start_description') or integration.get('agent_description') or ''))},
-        )
+        resources = [
+{resources_block if resources_block else "    # Add V2ResourceDefinition(...) entries here when Studio should manage agent-owned data."}
+        ]
 
-        job_stop_method = AgentMethod(
-            name="stop",
-            method={f"{workflow_module}.stop"!r},
-            is_async=False,
-            description="Stop the running job (placeholder wrapper)",
-        )
 
-        job_status_method = AgentMethod(
-            name="status",
-            method={f"{workflow_module}.check_status"!r},
-            is_async=False,
-            description="Return job status (placeholder wrapper)",
+        registration = build_v2_agent_registration(
+            agent_id={agent_slug!r},
+            agent_slug={agent_slug!r},
+            display_name={agent_display_name!r},
+            agent_card_url={f"/.well-known/agents/v{agent_version}/{agent_slug}_agent.json"!r},
+            controller_url="/a2a",
+            a2ui_catalog_version={a2ui_catalog_version!r},
+            surfaces={_render_quoted_list(["job.start", "case.step.awaiting"])},
+            actions={_render_quoted_list(["job.start", "job.sync", "step.awaiting.submit"])},
+            resources=resources,
+            datasets={datasets!r},
+            case_lanes={lanes!r},
+            artifact_types={artifact_types!r},
+            job_policy={{"sync": {{"action": "job.sync"}}}},
         )
 
 
         agent = Agent(
-            name={repr(str(integration.get('agent_display_name') or agent_slug))},
+            name={agent_display_name!r},
+            version={agent_version!r},
             description={repr(str(integration.get('agent_description') or ''))},
-            methods=AgentMethods(
-                job_start=job_start_method,
-                job_stop=job_stop_method,
-                job_status=job_status_method,
-                chat=None,
-                custom=None,
-            ),
             parameters_setup=agent_parameters,
+            supervaizer_v2_registration=registration,
         )
 
 
         account = Account(
-            workspace_id=os.getenv({workspace_env!r}) or "dummy_workspace_id",
-            api_key=os.getenv({api_key_env!r}) or "dummy_api_key",
+            workspace_id=require_env({workspace_env!r}),
+            api_key=require_env({api_key_env!r}),
             api_url=os.getenv({api_url_env!r}) or "https://app.supervaize.com",
         )
 
@@ -640,14 +651,21 @@ def _render_controller_py(spec: dict[str, Any], controller_filename: str, workfl
         server = Server(
             agents=[agent],
             a2a_endpoints=True,
-            acp_endpoints=True,
+            admin_interface=True,
             supervisor_account=account,
         )
+
+        for surface in registration.capabilities.surfaces:
+            server.register_v2_surface(surface, handle_v2_surface, agent_slug=agent.slug)
+
+        for action in registration.capabilities.actions:
+            server.register_v2_action(action, handle_v2_action, agent_slug=agent.slug)
 
 
         if __name__ == "__main__":
             server.launch(log_level="DEBUG")
         """
+        )
     )
 
 
@@ -663,11 +681,15 @@ def _render_sv_main_py(spec: dict[str, Any], controller_filename: str, workflow_
     target = spec["target_agent"]
     job_mapping = spec["job_mapping"]
     steps = spec.get("steps", [])
+    start_fields = spec.get("start_fields", [])
+    resources = spec.get("resources", [])
 
-    controller_module = _module_from_filename(controller_filename)
     target_module = str(target["module"])
     target_fn = str(target["function"])
     wrapper_fn = str(integration.get("workflow_wrapper_function") or f"process_{_slug(integration['agent_slug'])}_workflow")
+    agent_slug = _v2_slug(str(integration["agent_slug"]))
+    a2ui_catalog_version = str(integration.get("a2ui_catalog_version") or f"{agent_slug}-ui.1")
+    job_start_title = str(integration.get("job_start_title") or f"Start {integration.get('agent_display_name') or agent_slug}")
     case_strategy = str(job_mapping.get("case_strategy", "single_case"))
     case_collection_field = job_mapping.get("case_collection_field")
     case_items_format = str(job_mapping.get("case_items_format", "single"))
@@ -682,39 +704,24 @@ def _render_sv_main_py(spec: dict[str, Any], controller_filename: str, workflow_
             "id": _slug(str(step.get("id") or step.get("name") or "step")),
             "name": str(step.get("name") or step.get("id") or "Step"),
             "description": str(step.get("description") or ""),
+            "activity": str(step.get("activity") or "operation"),
+            "status": str(step.get("status") or "completed"),
+            "outputs": list(step.get("outputs") or []),
         }
         for step in steps
     ] or [
-        {"id": "execute", "name": "Run Agent Logic", "description": "Execute target function"}
+        {"id": "execute", "name": "Run Agent Logic", "description": "Execute target function", "activity": "operation", "status": "completed", "outputs": []}
     ]
 
-    target_kwargs_lines = [f"        \"{name}\": fields.get({name!r})," for name in kwargs_from_fields]
+    target_kwargs_lines = [f"                    \"{name}\": action_input.get({name!r})," for name in kwargs_from_fields]
     if case_item_param:
-        target_kwargs_lines.append(f"        \"{case_item_param}\": case_item,")
+        target_kwargs_lines.append(f"                    \"{case_item_param}\": case_item,")
     if not target_kwargs_lines:
-        target_kwargs_lines = ["        # Add target function kwargs mapping from `fields` here."]
+        target_kwargs_lines = ["                    # Add target function kwargs mapping from `input` here."]
     target_kwargs_block = "\n".join(target_kwargs_lines)
 
-    step_emissions = []
-    for idx, step in enumerate(step_defs_literal):
-        call_hint = "  # TODO: place/keep target function call around the correct step" if idx == 0 else ""
-        step_emissions.append(
-            textwrap.dedent(
-                f"""\
-                    _emit_case_step(
-                        case,
-                        step_id={step['id']!r},
-                        step_name={step['name']!r},
-                        payload={{"description": {step['description']!r}}},
-                    ){call_hint}
-                """
-            ).rstrip()
-        )
-    steps_block = "\n\n".join(step_emissions)
-    indented_steps_block = textwrap.indent(steps_block, " " * 24) if steps_block else "                        pass"
-
     guidance = f"""# Generated by supervaizer_integration helper.
-# Customize this file to map your existing agent logic to Supervaizer runtime semantics.
+# Customize this file to map your existing agent logic to Supervaizer v2 runtime semantics.
 #
 # Job: {job_mapping.get('job_definition', '')}
 # Case strategy: {case_strategy}
@@ -729,23 +736,24 @@ def _render_sv_main_py(spec: dict[str, Any], controller_filename: str, workflow_
 # 4) Enrich case updates with payloads and HITL where needed
 """
 
-    return textwrap.dedent(
+    return _strip_template_indent(
+        textwrap.dedent(
         f"""\
         {guidance}
         from __future__ import annotations
 
-        import os
         import re
-        from datetime import datetime
         from typing import Any
 
-        from supervaizer import Case, CaseNodeUpdate
-        from supervaizer.job import EntityStatus, JobContext, JobResponse
-
-        from {controller_module} import account
+        from supervaizer.contracts import SUPERVAIZER_V2_A2UI_VERSION
         from {target_module} import {target_fn} as target_agent_function
 
 
+        AGENT_SLUG = {agent_slug!r}
+        A2UI_CATALOG_VERSION = {a2ui_catalog_version!r}
+        JOB_START_TITLE = {job_start_title!r}
+        START_FIELDS = {start_fields!r}
+        RESOURCES = {resources!r}
         CASE_STRATEGY = {case_strategy!r}
         CASE_COLLECTION_FIELD = {case_collection_field!r}
         CASE_ITEMS_FORMAT = {case_items_format!r}
@@ -760,26 +768,23 @@ def _render_sv_main_py(spec: dict[str, Any], controller_filename: str, workflow_
             return safe or "case"
 
 
-        def _as_job_context(context_raw: Any) -> JobContext:
-            if isinstance(context_raw, JobContext):
-                return context_raw
-            if isinstance(context_raw, dict):
-                return JobContext(**context_raw)
-            raise ValueError(f"context must be dict or JobContext, got {{type(context_raw)}}")
+        def _request_dict(request: Any) -> dict[str, Any]:
+            if isinstance(request, dict):
+                return request
+            if hasattr(request, "model_dump"):
+                return request.model_dump(mode="python")
+            raise TypeError(f"Unsupported Supervaizer v2 request type: {{type(request).__name__}}")
 
 
-        def _apply_agent_parameters(agent_parameters: list[dict[str, Any]] | None) -> None:
-            for param in agent_parameters or []:
-                name = param.get("name")
-                value = param.get("value")
-                if name and value is not None:
-                    os.environ[str(name)] = str(value)
+        def _action_input(request: dict[str, Any]) -> dict[str, Any]:
+            value = request.get("input")
+            return value if isinstance(value, dict) else {{}}
 
 
-        def _coerce_case_items(fields: dict[str, Any]) -> list[Any]:
+        def _coerce_case_items(action_input: dict[str, Any]) -> list[Any]:
             if CASE_STRATEGY != "per_item":
                 return [None]
-            raw = fields.get(CASE_COLLECTION_FIELD) if CASE_COLLECTION_FIELD else None
+            raw = action_input.get(CASE_COLLECTION_FIELD) if CASE_COLLECTION_FIELD else None
             if raw is None:
                 return []
             if CASE_ITEMS_FORMAT == "list" and isinstance(raw, list):
@@ -795,123 +800,174 @@ def _render_sv_main_py(spec: dict[str, Any], controller_filename: str, workflow_
             return [raw]
 
 
-        def _emit_case_step(case: Case, step_id: str, step_name: str, payload: dict[str, Any] | None = None) -> None:
-            case.update(
-                all_steps_start_method.make_update(
-                    step_id,
-                    payload={{
-                        "step_name": step_name,
-                        "step_id": step_id,
-                        **(payload or {{}}),
+        def handle_v2_surface(surface_request: Any) -> dict[str, Any]:
+            request = _request_dict(surface_request)
+            surface = str(request.get("surface") or "")
+            if surface == "job.start":
+                return {{
+                    "surface": "job.start",
+                    "a2ui_version": SUPERVAIZER_V2_A2UI_VERSION,
+                    "a2ui_catalog_version": A2UI_CATALOG_VERSION,
+                    "document": {{
+                        "type": "Form",
+                        "id": f"{{AGENT_SLUG}}.job.start",
+                        "title": JOB_START_TITLE,
+                        "fields": START_FIELDS,
+                        "submit": {{"action": "job.start", "label": "Start"}},
                     }},
-                    is_final=False,
+                }}
+            if surface == "case.step.awaiting":
+                return {{
+                    "surface": "case.step.awaiting",
+                    "a2ui_version": SUPERVAIZER_V2_A2UI_VERSION,
+                    "a2ui_catalog_version": A2UI_CATALOG_VERSION,
+                    "document": {{
+                        "type": "Form",
+                        "id": f"{{AGENT_SLUG}}.case.step.awaiting",
+                        "title": "Human review",
+                        "fields": [
+                            {{"id": "approved", "label": "Approve", "type": "boolean", "required": True}},
+                            {{"id": "comment", "label": "Comment", "type": "string", "required": False}},
+                        ],
+                        "submit": {{"action": "step.awaiting.submit", "label": "Submit"}},
+                    }},
+                }}
+            raise ValueError(f"Unsupported surface: {{surface}}")
+
+
+        def handle_v2_action(action_request: Any) -> dict[str, Any]:
+            request = _request_dict(action_request)
+            action = str(request.get("action") or "")
+            if action == "job.start":
+                return {wrapper_fn}(request)
+            if action == "job.sync":
+                return _sync_job(request)
+            if action == "step.awaiting.submit":
+                return _submit_awaiting(request)
+            if action.startswith("resource."):
+                return _handle_resource_action(action, request)
+            raise ValueError(f"Unsupported action: {{action}}")
+
+
+        def {wrapper_fn}(request: dict[str, Any]) -> dict[str, Any]:
+            action_input = _action_input(request)
+            job_id = str(request.get("job_id") or request.get("request_id") or "local-job")
+            case_items = _coerce_case_items(action_input)
+            if CASE_STRATEGY == "per_item" and not case_items:
+                raise ValueError(
+                    f"No case items found in field {{CASE_COLLECTION_FIELD!r}}. Update the v2 job_mapping/case field mapping."
                 )
-            )
 
+            cases: list[dict[str, Any]] = []
+            results: list[dict[str, Any]] = []
 
-        def {wrapper_fn}(**kwargs: Any) -> JobResponse:
-            # Supervaizer job wrapper around the existing Python agent.
-            job_context = None
-            try:
-                fields = kwargs.get("fields", {{}}) or {{}}
-                _apply_agent_parameters(kwargs.get("agent_parameters", []))
-                job_context = _as_job_context(kwargs.get("context"))
-                case_items = _coerce_case_items(fields)
-                if CASE_STRATEGY == "per_item" and not case_items:
-                    raise ValueError(
-                        f"No case items found in field {{CASE_COLLECTION_FIELD!r}}. Update the job_mapping/case field mapping."
-                    )
-
-                all_results: list[dict[str, Any]] = []
-
-                # Single-case flows still use one case so the user gets step-level observability.
-                if CASE_STRATEGY != "per_item":
-                    case_items = [None]
-
-                for idx, case_item in enumerate(case_items, start=1):
-                    if case_item is None:
-                        case_name = f"{{CASE_NAME_PREFIX}}"
-                        case_desc = CASE_DESCRIPTION_TEMPLATE
-                        case_id = f"{{_safe_case_id(CASE_NAME_PREFIX)}}_{{idx}}"
-                    else:
-                        case_name = f"{{CASE_NAME_PREFIX}}: {{case_item}}"
-                        case_desc = f"{{CASE_DESCRIPTION_TEMPLATE}} ({{CASE_ITEM_LABEL}}={{case_item}})"
-                        case_id = f"{{_safe_case_id(CASE_NAME_PREFIX)}}_{{_safe_case_id(str(case_item))}}"
-
-                    case = Case.start(
-                        job_id=job_context.job_id,
-                        account=account,
-                        name=case_name,
-                        description=case_desc,
-                        case_id=case_id,
-                    )
-
-                    try:
-{indented_steps_block}
-
-                        target_kwargs = {{
+            for idx, case_item in enumerate(case_items, start=1):
+                target_kwargs = {{
 {target_kwargs_block}
-                        }}
+                }}
+                target_kwargs = {{k: v for k, v in target_kwargs.items() if v is not None}}
+                result = target_agent_function(**target_kwargs)
+                results.append({{"case_item": case_item, "result": result}})
+                cases.append(_case_snapshot(idx, case_item, result))
 
-                        # Remove None values by default; keep/adjust this behavior if None is meaningful.
-                        target_kwargs = {{k: v for k, v in target_kwargs.items() if v is not None}}
-
-                        # TODO: Add type conversions here (e.g., int/float/bool parsing) based on your field schema.
-                        result = target_agent_function(**target_kwargs)
-
-                        case_result = {{
-                            "status": "completed",
-                            "case_item": case_item,
-                            "result": result,
-                        }}
-                        case.close(case_result=case_result, final_cost=0.0)
-                        all_results.append(case_result)
-                    except Exception as case_error:
-                        case.close(
-                            case_result={{
-                                "status": "failed",
-                                "case_item": case_item,
-                                "error": str(case_error),
-                            }},
-                            final_cost=0.0,
-                        )
-                        raise
-
-                return JobResponse(
-                    job_id=job_context.job_id,
-                    status=EntityStatus.COMPLETED,
-                    message="Job completed",
-                    payload={{
-                        "case_count": len(all_results),
-                        "results": all_results,
-                    }},
-                )
-
-            except Exception as exc:
-                return JobResponse(
-                    job_id=(job_context.job_id if job_context else "unknown"),
-                    status=EntityStatus.FAILED,
-                    message=f"Job failed: {{exc}}",
-                    payload={{"error": str(exc)}},
-                    error=str(exc),
-                )
-
-
-        def stop() -> dict[str, Any]:
             return {{
-                "status": "stopped",
-                "timestamp": datetime.now().isoformat(),
-                "message": "Implement project-specific stop behavior in agent_impl.py",
+                "status": "ok",
+                "effects": [
+                    {{
+                        "type": "job.started",
+                        "job_id": job_id,
+                        "status": "completed",
+                        "count": len(cases),
+                    }}
+                ],
+                "job_state": {{
+                    "job": {{
+                        "id": job_id,
+                        "agent_slug": str(request.get("agent_slug") or AGENT_SLUG),
+                        "mission_id": str(request.get("mission_id") or "local-mission"),
+                        "status": "completed",
+                        "source": {{"type": "fresh_start"}},
+                    }},
+                    "cases": cases,
+                }},
             }}
 
 
-        def check_status() -> dict[str, Any]:
+        def _case_snapshot(index: int, case_item: Any, result: Any) -> dict[str, Any]:
+            if case_item is None:
+                title = CASE_NAME_PREFIX
+                case_id = f"{{_safe_case_id(CASE_NAME_PREFIX)}}_{{index}}"
+            else:
+                title = f"{{CASE_NAME_PREFIX}}: {{case_item}}"
+                case_id = f"{{_safe_case_id(CASE_NAME_PREFIX)}}_{{_safe_case_id(str(case_item))}}"
             return {{
+                "id": case_id,
+                "lane": "work",
+                "title": title,
                 "status": "completed",
-                "timestamp": datetime.now().isoformat(),
-                "message": "Implement project-specific status behavior in agent_impl.py",
+                "steps": [
+                    {{
+                        "id": step["id"],
+                        "activity": step.get("activity", "operation"),
+                        "status": step.get("status", "completed"),
+                        "title": step.get("name"),
+                        "outputs": step.get("outputs", []),
+                    }}
+                    for step in FLOW_STEPS
+                ],
+            }}
+
+
+        def _sync_job(request: dict[str, Any]) -> dict[str, Any]:
+            return {{
+                "status": "ok",
+                "effects": [
+                    {{
+                        "type": "job.synced",
+                        "job_id": request.get("job_id"),
+                        "status": "completed",
+                        "message": "Replace this placeholder with real agent status convergence.",
+                    }}
+                ],
+            }}
+
+
+        def _submit_awaiting(request: dict[str, Any]) -> dict[str, Any]:
+            return {{
+                "status": "ok",
+                "effects": [
+                    {{
+                        "type": "step.awaiting.submitted",
+                        "job_id": request.get("job_id"),
+                        "case_id": request.get("case_id"),
+                        "step_id": request.get("step_id"),
+                        "status": "completed",
+                    }}
+                ],
+            }}
+
+
+        def _handle_resource_action(action: str, request: dict[str, Any]) -> dict[str, Any]:
+            parts = action.split(".")
+            if len(parts) != 3:
+                raise ValueError(f"Invalid resource action: {{action}}")
+            _, resource_id, operation = parts
+            if operation != "list":
+                raise NotImplementedError(
+                    f"Implement resource action {{action}} with explicit workspace/tenant authorization."
+                )
+            return {{
+                "status": "ok",
+                "effects": [
+                    {{
+                        "type": "resource.listed",
+                        "resource": resource_id,
+                        "items": [],
+                    }}
+                ],
             }}
         """
+        )
     )
 
 
@@ -962,8 +1018,8 @@ def _scaffold_integration_impl(
             },
             "next_steps": [
                 "Review the generated files and customize field-to-function mapping in agent_impl.py.",
-                "Refine step updates (payloads, HITL, errors) to match your business workflow.",
-                "Run the controller and test with trigger-job --dry-run, then a real run.",
+                "Refine case snapshots, HITL awaiting forms, resources, and sync behavior to match your business workflow.",
+                "Run the controller and test with load-surface plus invoke-action --dry-run, then a real action call.",
             ],
         },
         pretty=pretty,
@@ -1120,6 +1176,8 @@ def _discover_controller_impl(controller_url: str, controller_api_key: str | Non
                         "tags": spec.get("tags", []),
                     }
                 )
+    has_a2a = any(path == "/a2a" for path in paths)
+    has_events = any(path == "/a2a/events" for path in paths)
 
     _print_json(
         {
@@ -1127,8 +1185,10 @@ def _discover_controller_impl(controller_url: str, controller_api_key: str | Non
             "operation": "discover-controller",
             "controller_url": base_url,
             "status_code": status,
+            "a2a_json_rpc": has_a2a,
+            "a2a_events": has_events,
             "job_routes": job_routes,
-            "recommended_trigger_route": "/job/start" if any(r["path"] == "/job/start" and r["method"] == "POST" for r in job_routes) else None,
+            "recommended_controller_endpoint": "/a2a" if has_a2a else None,
         },
         pretty=pretty,
     )
@@ -1167,13 +1227,15 @@ def _env_status_impl(shell_template: bool, pretty: bool) -> None:
     )
 
 
-def _trigger_job_impl(
+def _invoke_action_impl(
     controller_url: str,
-    route: str,
     controller_api_key: str | None,
-    agent_name: str,
-    agent_method: str,
-    user_id: str,
+    agent_slug: str,
+    action: str,
+    surface: str,
+    workspace_slug: str,
+    mission_id: str,
+    actor_id: str,
     job_id: str | None,
     params_json: str | None,
     params_file: str | None,
@@ -1182,8 +1244,7 @@ def _trigger_job_impl(
     pretty: bool,
 ) -> None:
     base_url = _normalize_controller_url(controller_url)
-    route_path = route if route.startswith("/") else f"/{route}"
-    endpoint = f"{base_url}{route_path}"
+    endpoint = f"{base_url}/a2a"
     api_key = (
         controller_api_key
         or os.getenv("CONTROLLER_AUTH_KEY")
@@ -1191,19 +1252,30 @@ def _trigger_job_impl(
         or os.getenv("SUPERVAIZER_CONTROLLER_AUTH_KEY")
     )
     params = _load_params(params_json=params_json, params_file=params_file)
+    request_id = str(uuid.uuid4())
     payload = {
-        "agent_name": agent_name,
-        "agent_method": agent_method,
-        "user_id": user_id,
-        "params": params,
-        "job_id": job_id or str(uuid.uuid4()),
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "supervaizer/action.invoke",
+        "params": {
+            "request_id": request_id,
+            "actor": {"id": actor_id},
+            "workspace": {"id": workspace_slug, "slug": workspace_slug},
+            "mission_id": mission_id,
+            "agent_slug": agent_slug,
+            "surface": surface,
+            "action": action,
+            "input": params,
+            "job_id": job_id or f"local-{request_id}",
+            "idempotency_key": request_id,
+        },
     }
 
     if dry_run:
         _print_json(
             {
                 "ok": True,
-                "operation": "trigger-job",
+                "operation": "invoke-action",
                 "dry_run": True,
                 "endpoint": endpoint,
                 "headers": {
@@ -1211,7 +1283,7 @@ def _trigger_job_impl(
                     "Content-Type": "application/json",
                     "X-API-Key": "***" if api_key else None,
                 },
-                "payload": payload,
+                "json_rpc": payload,
             },
             pretty=pretty,
         )
@@ -1227,10 +1299,67 @@ def _trigger_job_impl(
     _print_json(
         {
             "ok": True,
-            "operation": "trigger-job",
+            "operation": "invoke-action",
             "endpoint": endpoint,
             "status_code": status,
-            "request": payload,
+            "json_rpc": payload,
+            "response": response,
+        },
+        pretty=pretty,
+    )
+
+
+def _load_surface_impl(
+    controller_url: str,
+    controller_api_key: str | None,
+    agent_slug: str,
+    surface: str,
+    workspace_slug: str,
+    mission_id: str,
+    actor_id: str,
+    input_json: str | None,
+    input_file: str | None,
+    timeout_seconds: int,
+    pretty: bool,
+) -> None:
+    base_url = _normalize_controller_url(controller_url)
+    endpoint = f"{base_url}/a2a"
+    api_key = (
+        controller_api_key
+        or os.getenv("CONTROLLER_AUTH_KEY")
+        or os.getenv("SUPERVAIZE_CONTROLLER_AUTH_KEY")
+        or os.getenv("SUPERVAIZER_CONTROLLER_AUTH_KEY")
+    )
+    action_input = _load_params(params_json=input_json, params_file=input_file)
+    request_id = str(uuid.uuid4())
+    payload = {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": "supervaizer/surface.load",
+        "params": {
+            "request_id": request_id,
+            "actor": {"id": actor_id},
+            "workspace": {"id": workspace_slug, "slug": workspace_slug},
+            "mission_id": mission_id,
+            "agent_slug": agent_slug,
+            "surface": surface,
+            "input": action_input,
+        },
+    }
+    status, response = _http_json(
+        "POST",
+        endpoint,
+        body=payload,
+        headers=_controller_headers(api_key),
+        timeout=timeout_seconds,
+    )
+    _print_json(
+        {
+            "ok": True,
+            "operation": "load-surface",
+            "endpoint": endpoint,
+            "status_code": status,
+            "json_rpc": payload,
             "response": response,
         },
         pretty=pretty,
@@ -1321,35 +1450,71 @@ def discover_controller(
     timeout_seconds: int = typer.Option(DEFAULT_TIMEOUT, "--timeout-seconds", help="HTTP timeout in seconds."),
     pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
 ) -> None:
-    """Inspect a controller OpenAPI spec and list job-related routes."""
+    """Inspect a controller OpenAPI spec and report v2 A2A endpoints."""
     _handle(pretty, _discover_controller_impl, controller_url, controller_api_key, timeout_seconds, pretty)
 
 
-@app.command("trigger-job")
-def trigger_job(
+@app.command("load-surface")
+def load_surface(
     controller_url: str = typer.Option(..., "--controller-url", help="Base URL, e.g. http://127.0.0.1:8000"),
-    route: str = typer.Option("/job/start", "--route", help="Trigger route (default: /job/start)"),
     controller_api_key: str | None = typer.Option(None, "--controller-api-key", help="Controller auth key (optional)"),
-    agent_name: str = typer.Option(..., "--agent-name"),
-    agent_method: str = typer.Option(..., "--agent-method"),
-    user_id: str = typer.Option(..., "--user-id"),
-    job_id: str | None = typer.Option(None, "--job-id", help="Optional job id (UUID generated if omitted)"),
-    params_json: str | None = typer.Option(None, "--params-json", help="JSON object string for JobRequest.params"),
-    params_file: str | None = typer.Option(None, "--params-file", help="Path to JSON file for JobRequest.params"),
+    agent_slug: str = typer.Option(..., "--agent-slug", help="Agent slug in the v2 registration."),
+    surface: str = typer.Option(..., "--surface", help="Surface id, e.g. job.start."),
+    workspace_slug: str = typer.Option(..., "--workspace-slug", help="Studio workspace slug."),
+    mission_id: str = typer.Option("local-mission", "--mission-id", help="Mission id for the surface context."),
+    actor_id: str = typer.Option("local-user", "--actor-id", help="Actor id for the surface context."),
+    input_json: str | None = typer.Option(None, "--input-json", help="JSON object string for surface input."),
+    input_file: str | None = typer.Option(None, "--input-file", help="Path to JSON file for surface input."),
     timeout_seconds: int = typer.Option(DEFAULT_TIMEOUT, "--timeout-seconds", help="HTTP timeout in seconds."),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print request payload without sending."),
     pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
 ) -> None:
-    """POST a job request to the controller after your integration is scaffolded and running."""
+    """Load a Supervaizer v2 A2UI surface through A2A JSON-RPC."""
     _handle(
         pretty,
-        _trigger_job_impl,
+        _load_surface_impl,
         controller_url,
-        route,
         controller_api_key,
-        agent_name,
-        agent_method,
-        user_id,
+        agent_slug,
+        surface,
+        workspace_slug,
+        mission_id,
+        actor_id,
+        input_json,
+        input_file,
+        timeout_seconds,
+        pretty,
+    )
+
+
+@app.command("invoke-action")
+def invoke_action(
+    controller_url: str = typer.Option(..., "--controller-url", help="Base URL, e.g. http://127.0.0.1:8000"),
+    controller_api_key: str | None = typer.Option(None, "--controller-api-key", help="Controller auth key (optional)"),
+    agent_slug: str = typer.Option(..., "--agent-slug", help="Agent slug in the v2 registration."),
+    action: str = typer.Option(..., "--action", help="V2 action id, e.g. job.start or resource.contacts.list."),
+    surface: str = typer.Option("job.start", "--surface", help="Surface context for the action."),
+    workspace_slug: str = typer.Option(..., "--workspace-slug", help="Studio workspace slug."),
+    mission_id: str = typer.Option("local-mission", "--mission-id", help="Mission id for the action context."),
+    actor_id: str = typer.Option("local-user", "--actor-id", help="Actor id for the action context."),
+    job_id: str | None = typer.Option(None, "--job-id", help="Optional job id."),
+    params_json: str | None = typer.Option(None, "--params-json", help="JSON object string for action input."),
+    params_file: str | None = typer.Option(None, "--params-file", help="Path to JSON file for action input."),
+    timeout_seconds: int = typer.Option(DEFAULT_TIMEOUT, "--timeout-seconds", help="HTTP timeout in seconds."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print JSON-RPC payload without sending."),
+    pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
+) -> None:
+    """Invoke a Supervaizer v2 action through A2A JSON-RPC."""
+    _handle(
+        pretty,
+        _invoke_action_impl,
+        controller_url,
+        controller_api_key,
+        agent_slug,
+        action,
+        surface,
+        workspace_slug,
+        mission_id,
+        actor_id,
         job_id,
         params_json,
         params_file,
