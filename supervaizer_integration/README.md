@@ -25,8 +25,11 @@ Then point your coding agent to the skill definition in [`SKILL.md`](./SKILL.md)
 
 Core protocol docs:
 
-- Supervaizer v2: `RUNWAIZE/supervaizer/docs/2026_05_SUPERVAIZER_v2.md`
-- Protocols: `RUNWAIZE/supervaizer/docs/2026_05_PROTOCOLS.md`
-- Hello World example: https://github.com/supervaize/supervaize_hello_world
+- Supervaizer v2: https://github.com/supervaize/supervaizer/blob/main/docs/2026_05_SUPERVAIZER_v2.md
+- Protocols: https://github.com/supervaize/supervaizer/blob/main/docs/2026_05_PROTOCOLS.md
+- Job Configurator (Configure screen): https://docs.runwaize.com/docs/supervaizer-controller/job-configurator
+- Hello World example: https://github.com/runwaize/supervaize_hello_world
+
+The skill targets Supervaizer 1.9 or later. It covers workspace authorization, local mode, action metadata, human in the loop, resources, dashboards, scheduled start, rule checkpoints, the Job Configurator, guided setup and billable consumption.
 
 Full skill documentation: https://docs.runwaize.com/docs/integrations/skills/supervaizer-integration

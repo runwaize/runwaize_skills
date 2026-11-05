@@ -33,6 +33,32 @@ _No changes yet._
 
 _No changes yet._
 
+### [2.1.0] - 2026-11-05
+
+Updated for Supervaizer SDK 1.1 to 1.9.
+
+#### Added
+
+- `SKILL.md`: runtime rules (action metadata, top-level `job_state`, job cost, idempotency, verified workspace context, mission context), a table of optional capabilities with the SDK release of each (human in the loop, file fields, workspace binding, agent actions, `context.assign`, job setup policy, labels, rule checkpoints, scheduled start, introduction, full description, guided setup, billable consumption), a Job Configurator section, and a Studio connection step with the workspace authorization variables.
+- Scaffold: `job.stop` action, an in-memory job store so `job.sync` and a retried `job.start` return the original `job_state`, and `integration.scheduled_start` in the spec.
+- Scaffold: local mode. With `SUPERVAIZER_LOCAL_MODE=true` the generated controller starts without a Studio account.
+
+#### Changed
+
+- Reference links point to the public SDK docs instead of local paths.
+- Scaffold registration uses the short `build_v2_agent_registration` form (no `agent_id`, `controller_url` or `agent_card_url`).
+
+#### Fixed
+
+- The generated controller failed to import on SDK 1.9: artifact types are keyed by `type`, and `capabilities.actions` holds `V2ActionDefinition` objects, so handlers are registered with `action.id`. A spec that still uses `id` for an artifact type is converted.
+- `load-surface` and `invoke-action` sent `actor.id`; the contract requires `actor.user_id`.
+
+### [2.0.0] - 2026-05-17
+
+#### Changed
+
+- Skill and scaffold retargeted to Supervaizer v2 (A2A JSON-RPC, A2UI surfaces, Jobs, Cases, Steps, Resources, Actions, `job.sync`).
+
 ### [1.0.0] - 2026-03-12
 
 #### Added

@@ -317,7 +317,7 @@ def _spec_template() -> dict[str, Any]:
         ],
         "datasets": [],
         "artifact_types": [
-            {"id": "result", "label": "Result"}
+            {"type": "result", "label": "Result"}
         ],
         "agent_parameters": [
             {
@@ -551,7 +551,12 @@ def _render_controller_py(spec: dict[str, Any], controller_filename: str, workfl
     envs = spec.get("supervaize_env", {})
     resources = spec.get("resources", [])
     datasets = spec.get("datasets", [])
-    artifact_types = spec.get("artifact_types", [])
+    # The SDK keys an artifact type by `type`; specs written for older helpers used `id`.
+    artifact_types = [
+        {("type" if key == "id" and "type" not in item else key): value for key, value in item.items()}
+        for item in spec.get("artifact_types", [])
+    ]
+    scheduled_start = bool(integration.get("scheduled_start", False))
     lanes = spec.get("lanes", [{"id": "work", "label": "Work", "default": True}])
 
     workflow_module = _module_from_filename(workflow_filename)
@@ -616,19 +621,20 @@ def _render_controller_py(spec: dict[str, Any], controller_filename: str, workfl
 
 
         registration = build_v2_agent_registration(
-            agent_id={agent_slug!r},
             agent_slug={agent_slug!r},
             display_name={agent_display_name!r},
-            agent_card_url={f"/.well-known/agents/v{agent_version}/{agent_slug}_agent.json"!r},
-            controller_url="/a2a",
             a2ui_catalog_version={a2ui_catalog_version!r},
             surfaces={_render_quoted_list(["job.start", "case.step.awaiting"])},
-            actions={_render_quoted_list(["job.start", "job.sync", "step.awaiting.submit"])},
+            # A bare id is job-scoped and mutating. Use V2ActionDefinition(id=..., mutating=False)
+            # for a read-only action, and scope="workspace" or "mission" where that applies.
+            actions={_render_quoted_list(["job.start", "job.sync", "job.stop", "step.awaiting.submit"])},
             resources=resources,
             datasets={datasets!r},
             case_lanes={lanes!r},
             artifact_types={artifact_types!r},
             job_policy={{"sync": {{"action": "job.sync"}}}},
+            # True lets Studio start this agent on a schedule through the normal job.start.
+            scheduled_start={scheduled_start!r},
         )
 
 
@@ -641,7 +647,11 @@ def _render_controller_py(spec: dict[str, Any], controller_filename: str, workfl
         )
 
 
-        account = Account(
+        # With SUPERVAIZER_LOCAL_MODE=true the controller runs without Studio: no account,
+        # and /a2a accepts v2 calls without a workspace token. A Studio-registered
+        # controller also needs the SUPERVAIZER_WORKSPACE_AUTH_* variables.
+        local_mode = os.getenv("SUPERVAIZER_LOCAL_MODE", "").lower() == "true"
+        account = None if local_mode else Account(
             workspace_id=require_env({workspace_env!r}),
             api_key=require_env({api_key_env!r}),
             api_url=os.getenv({api_url_env!r}) or "https://app.supervaize.com",
@@ -659,7 +669,7 @@ def _render_controller_py(spec: dict[str, Any], controller_filename: str, workfl
             server.register_v2_surface(surface, handle_v2_surface, agent_slug=agent.slug)
 
         for action in registration.capabilities.actions:
-            server.register_v2_action(action, handle_v2_action, agent_slug=agent.slug)
+            server.register_v2_action(action.id, handle_v2_action, agent_slug=agent.slug)
 
 
         if __name__ == "__main__":
@@ -763,6 +773,11 @@ def _render_sv_main_py(spec: dict[str, Any], controller_filename: str, workflow_
         FLOW_STEPS = {step_defs_literal!r}
 
 
+        # In-memory job states, so job.sync and a retried job.start answer with what job.start
+        # created. Lost on restart: a real agent keeps this in its own store.
+        _JOBS: dict[str, dict[str, Any]] = {{}}
+
+
         def _safe_case_id(value: str) -> str:
             safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(value)).strip("_").lower()
             return safe or "case"
@@ -842,6 +857,11 @@ def _render_sv_main_py(spec: dict[str, Any], controller_filename: str, workflow_
                 return {wrapper_fn}(request)
             if action == "job.sync":
                 return _sync_job(request)
+            if action == "job.stop":
+                # Studio's Stop and Complete buttons call job.stop on a v2 agent.
+                # TODO: cancel the real work of this job.
+                _JOBS.pop(str(request.get("job_id")), None)
+                return {{"status": "ok", "effects": [{{"type": "job.stopped", "job_id": request.get("job_id")}}]}}
             if action == "step.awaiting.submit":
                 return _submit_awaiting(request)
             if action.startswith("resource."):
@@ -852,6 +872,13 @@ def _render_sv_main_py(spec: dict[str, Any], controller_filename: str, workflow_
         def {wrapper_fn}(request: dict[str, Any]) -> dict[str, Any]:
             action_input = _action_input(request)
             job_id = str(request.get("job_id") or request.get("request_id") or "local-job")
+            if job_id in _JOBS:
+                # Studio retries an uncertain or scheduled start for the same job: never run it twice.
+                return {{
+                    "status": "ok",
+                    "effects": [{{"type": "job.started", "job_id": job_id, "status": _JOBS[job_id]["job"]["status"]}}],
+                    "job_state": _JOBS[job_id],
+                }}
             case_items = _coerce_case_items(action_input)
             if CASE_STRATEGY == "per_item" and not case_items:
                 raise ValueError(
@@ -870,26 +897,22 @@ def _render_sv_main_py(spec: dict[str, Any], controller_filename: str, workflow_
                 results.append({{"case_item": case_item, "result": result}})
                 cases.append(_case_snapshot(idx, case_item, result))
 
+            # Studio projects cases only from the result's top-level job_state.
+            job_state = {{
+                "job": {{
+                    "id": job_id,
+                    "agent_slug": str(request.get("agent_slug") or AGENT_SLUG),
+                    "mission_id": str(request.get("mission_id") or "local-mission"),
+                    "status": "completed",
+                    "source": {{"type": "fresh_start"}},
+                }},
+                "cases": cases,
+            }}
+            _JOBS[job_id] = job_state
             return {{
                 "status": "ok",
-                "effects": [
-                    {{
-                        "type": "job.started",
-                        "job_id": job_id,
-                        "status": "completed",
-                        "count": len(cases),
-                    }}
-                ],
-                "job_state": {{
-                    "job": {{
-                        "id": job_id,
-                        "agent_slug": str(request.get("agent_slug") or AGENT_SLUG),
-                        "mission_id": str(request.get("mission_id") or "local-mission"),
-                        "status": "completed",
-                        "source": {{"type": "fresh_start"}},
-                    }},
-                    "cases": cases,
-                }},
+                "effects": [{{"type": "job.started", "job_id": job_id, "status": "completed", "count": len(cases)}}],
+                "job_state": job_state,
             }}
 
 
@@ -919,17 +942,15 @@ def _render_sv_main_py(spec: dict[str, Any], controller_filename: str, workflow_
 
 
         def _sync_job(request: dict[str, Any]) -> dict[str, Any]:
-            return {{
+            # TODO: converge with the real state of the agent's work, then return it.
+            result: dict[str, Any] = {{
                 "status": "ok",
-                "effects": [
-                    {{
-                        "type": "job.synced",
-                        "job_id": request.get("job_id"),
-                        "status": "completed",
-                        "message": "Replace this placeholder with real agent status convergence.",
-                    }}
-                ],
+                "effects": [{{"type": "job.synced", "job_id": request.get("job_id")}}],
             }}
+            job_state = _JOBS.get(str(request.get("job_id")))
+            if job_state is not None:
+                result["job_state"] = job_state
+            return result
 
 
         def _submit_awaiting(request: dict[str, Any]) -> dict[str, Any]:
@@ -1259,7 +1280,7 @@ def _invoke_action_impl(
         "method": "supervaizer/action.invoke",
         "params": {
             "request_id": request_id,
-            "actor": {"id": actor_id},
+            "actor": {"user_id": actor_id},
             "workspace": {"id": workspace_slug, "slug": workspace_slug},
             "mission_id": mission_id,
             "agent_slug": agent_slug,
@@ -1338,7 +1359,7 @@ def _load_surface_impl(
         "method": "supervaizer/surface.load",
         "params": {
             "request_id": request_id,
-            "actor": {"id": actor_id},
+            "actor": {"user_id": actor_id},
             "workspace": {"id": workspace_slug, "slug": workspace_slug},
             "mission_id": mission_id,
             "agent_slug": agent_slug,

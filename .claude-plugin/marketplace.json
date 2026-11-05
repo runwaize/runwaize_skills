@@ -11,8 +11,8 @@
     {
       "name": "supervaizer-integration",
       "source": "./supervaizer_integration",
-      "description": "Integrate any existing Python agent with the Supervaizer controller and Supervaize platform",
-      "version": "1.0.0",
+      "description": "Integrate an existing Python agent with Supervaizer v2, A2A JSON-RPC, A2UI surfaces, and Supervaize Studio",
+      "version": "2.1.0",
       "author": {
         "name": "Runwaize"
       },
