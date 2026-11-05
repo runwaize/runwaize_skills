@@ -6,7 +6,7 @@ Agent skills for the [Runwaize](https://runwaize.com) ecosystem. Each subfolder 
 
 | Skill                                                   | Purpose                                                                |
 | ------------------------------------------------------- | ---------------------------------------------------------------------- |
-| [`supervaizer_integration`](./supervaizer_integration/) | Integrate an existing Python agent with the Supervaizer controller     |
+| [`supervaizer-integration`](https://github.com/supervaize/supervaizer/tree/main/skills/supervaizer-integration) | Integrate an existing Python agent with Supervaizer v2. Lives in the SDK repository; this marketplace points to it |
 | [`supervaize_access`](./supervaize_access/)             | Operate against an existing Supervaize workspace from a chatbot or CLI |
 
 ## Documentation

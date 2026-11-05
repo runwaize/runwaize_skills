@@ -33,6 +33,12 @@ _No changes yet._
 
 _No changes yet._
 
+### [2.2.0] - 2026-11-06
+
+#### Changed
+
+- The skill moved to the Supervaizer SDK repository, `skills/supervaizer-integration/` (supervaize/supervaizer#165), and is released with the SDK. This repository keeps a pointer: the marketplace entry uses a `git-subdir` source, so `/plugin install supervaizer-integration` still works once the SDK change is on its default branch.
+
 ### [2.1.0] - 2026-11-06
 
 The skill no longer holds its own copy of the contract or of the controller code. The SDK, its docs and the Hello World example are the only sources, so the skill cannot drift from them.
