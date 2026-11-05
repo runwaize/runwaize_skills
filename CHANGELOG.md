@@ -41,6 +41,7 @@ Updated for Supervaizer SDK 1.1 to 1.9.
 
 - `SKILL.md`: runtime rules (action metadata, top-level `job_state`, job cost, idempotency, verified workspace context, mission context), a table of optional capabilities with the SDK release of each (human in the loop, file fields, workspace binding, agent actions, `context.assign`, job setup policy, labels, rule checkpoints, scheduled start, introduction, full description, guided setup, billable consumption), a Job Configurator section, and a Studio connection step with the workspace authorization variables.
 - `SKILL.md`: a component-by-need table and a life-of-the-job plan for the Job Configurator (checked against the Aidan interviewer agent), and an Analytics Dashboards section for `job.analytics` and `mission.analytics`.
+- `SKILL.md`: a Guided Setup section (job name in the preview input, read-only help actions with `target_field`, cost estimate units) and the required `select` behaviour.
 - Scaffold: `job.stop` action, an in-memory job store so `job.sync` and a retried `job.start` return the original `job_state`, and `integration.scheduled_start` in the spec.
 - Scaffold: local mode. With `SUPERVAIZER_LOCAL_MODE=true` the generated controller starts without a Studio account.
 

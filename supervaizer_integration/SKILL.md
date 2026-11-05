@@ -236,6 +236,15 @@ Add a capability only when the mapping in step 2 calls for it. Each row names th
 
 Every optional field is omitted from the registration when unset, so adding one capability does not change the others.
 
+## Guided Setup
+
+Use it when Studio's chat or setup panel must guide the operator through the start of a job. Read "Setup plan and field schema" and "Help actions and dry runs" in the v2 guide first.
+
+- **Do not ask for the job name.** For an agent that declares a setup plan, Studio adds the job's name to the preview input as `input.name`. Name the domain object from it. A value the agent declares for `name` wins.
+- **Declare help actions as read-only.** A help action is `{"id": ..., "kind": "help", "mutating": False, "scope": "job", "target_field": "<field id>"}`. It reads the open draft and returns a proposal for `target_field`. Nothing is applied until the user accepts it.
+- **Apply the plan values in `job.start`**, so the job does not ask for them a second time.
+- **State the cost estimate honestly.** Give a range and name its unit (for example `USD per interview`), or `status: "unknown"` with a `basis` that says why. Never a false exact number.
+
 ## Job Configurator (Configure Screen)
 
 Use it when a job needs setup that an operator edits on the job page: parameters, participants, a prompt or template, a readiness checklist, a launch button, export links. Follow the guide at https://docs.runwaize.com/docs/supervaizer-controller/job-configurator and copy from Hello World `agent_configurator.py`.
@@ -256,7 +265,7 @@ Design the sections with the user. The catalog covers these needs:
 
 | Need | Component | Notes |
 | --- | --- | --- |
-| Settings | `Form` with a `save` binding | Field types `text`, `number`, `boolean`, `date`, `email`, `select`, `resource_ref`, `file`, `list`; keys `default`, `required`, `read_only`, `multiline`, `options`, `options_source`, `depends_on`, `description` |
+| Settings | `Form` with a `save` binding | Field types `text`, `number`, `boolean`, `date`, `email`, `select`, `resource_ref`, `file`, `list`; keys `default`, `required`, `read_only`, `multiline`, `options`, `options_source`, `depends_on`, `description`, `placeholder`. A required `select` has no empty choice and shows its `placeholder` until the operator chooses |
 | Read-only facts | `Form` of `read_only` fields | Creation date, owner, status |
 | A one-click operation | `Form` whose `save` names the action | `save_label` is the button text, for example "Generate synthesis" |
 | File upload | `Form` with a top-level `file` field | `accept`, `max_bytes`, `storage: "studio"`; the agent receives a stored-file reference |
