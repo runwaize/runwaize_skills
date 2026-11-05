@@ -33,6 +33,7 @@ Read the source of truth before you generate code. Prefer a local checkout of th
 - Workspace agent grants: https://github.com/supervaize/supervaizer/blob/main/docs/2026_05_WORKSPACE_AGENT_GRANTS.md
 - Local testing: https://github.com/supervaize/supervaizer/blob/main/docs/2025_10_LOCAL_TESTING.md
 - Job Configurator (Configure screen) guide: https://docs.runwaize.com/docs/supervaizer-controller/job-configurator
+- Job and mission analytics guide: https://docs.runwaize.com/docs/supervaizer-controller/job-analytics
 - SDK changelog: https://github.com/supervaize/supervaizer/blob/main/docs/CHANGELOG.md
 - Hello World, a working agent that uses most capabilities below: https://github.com/runwaize/supervaize_hello_world
 
@@ -71,7 +72,8 @@ Ask only what is needed to make the v2 contract explicit:
 - Which Steps await a human? What A2UI fields should be submitted through `step.awaiting.submit`?
 - What Resources should Studio manage, at which scope (`workspace`, `mission`, `job`)?
 - Which Resource operations are allowed: `list`, `get`, `create`, `update`, `delete`, `import`?
-- Which Datasets or Vega-Lite dashboards should Studio render?
+- Which Datasets or Vega-Lite dashboards should Studio render, on the mission page, on each job page, or both?
+- Does a job need setup that an operator edits on the job page (a Configure screen)? Which sections, and how do they change after launch?
 - What Artifacts does the agent produce?
 - What external source can `job.sync` use to converge status?
 - Which optional capabilities below does the agent need? Add only those the business asks for.
@@ -217,7 +219,7 @@ Add a capability only when the mapping in step 2 calls for it. Each row names th
 | Human in the loop | Step `status="awaiting"` with `awaiting` (`reason`, `surface`, `action`, `fields`, optional `reopenable`); `case.step.awaiting` surface; `step.awaiting.submit` action | 1.0 (`reopenable` 1.6) | Hello World `agent_v2.py`, `tests/test_hitl.py` |
 | File upload fields | Awaiting field `type: "file"` with `accept`, `max_bytes`, `storage` (`studio` or `inline`) | 1.9 | v2 guide, "Step" |
 | Resources | `resources=[V2ResourceDefinition(...)]` with `scope`, `operations`, `auto_surface` | 1.0 | Hello World `agent_data_resource.py` |
-| Datasets and dashboards | `datasets=[...]` (query action derived, `mutating=False`); `mission.analytics` surface returning a `Dashboard` | 1.0 (`scope` 1.6) | Hello World `agent_dashboard.py` |
+| Datasets and dashboards | `datasets=[...]` (query action derived, `mutating=False`); `mission.analytics` and `job.analytics` surfaces returning a `Dashboard` | 1.0 (`scope` 1.6) | See "Analytics Dashboards" below |
 | Artifacts and deliverables | `artifact_types=[{"type", "label"}]`; step `outputs`; read-only `artifact.get` action | 1.0 | Hello World `agent_deliverable.py` |
 | Workspace binding | `workspace_binding` metadata with `workspace_binding.options` and `workspace_binding.create` | 1.1 | Workspace agent grants doc |
 | Agent-level actions | `AgentMethods` standard actions such as `agent.refresh`, plus custom agent actions | 1.2 | v2 guide, "Actions" |
@@ -249,6 +251,47 @@ The contract in short:
 7. A surface load never writes state. Validate again in every action: policies and readiness are presentation.
 8. Studio refuses the whole document on a contract error, including any key that normalizes to `html`, `script`, `iframe`, `src`, `style`, `css`, `import`, `expression`, `targetid`, `jobid`, `missionid`, `caseid` or `stepid`. Test every emitted document for these.
 9. Optional `job_state.job.display` (`entity_label`, `state_label`, `primary_action_label`) labels the job in Studio lists.
+
+Design the sections with the user. The catalog covers these needs:
+
+| Need | Component | Notes |
+| --- | --- | --- |
+| Settings | `Form` with a `save` binding | Field types `text`, `number`, `boolean`, `date`, `email`, `select`, `resource_ref`, `file`, `list`; keys `default`, `required`, `read_only`, `multiline`, `options`, `options_source`, `depends_on`, `description` |
+| Read-only facts | `Form` of `read_only` fields | Creation date, owner, status |
+| A one-click operation | `Form` whose `save` names the action | `save_label` is the button text, for example "Generate synthesis" |
+| File upload | `Form` with a top-level `file` field | `accept`, `max_bytes`, `storage: "studio"`; the agent receives a stored-file reference |
+| Rows to add, import, remove | `ResourceList` | Rows from `resource.<id>.list`; optional `create`, `import`, `delete` bindings; `create_selector` for a searchable picker; `resource_ref` needs `options_source` |
+| Prompt or template editing | `TemplateComposer` | `nodes`, `slots`, `tokens`, `versions`, `validation`, `preview`; read-only events `validation.requested` and `selection.changed` with `local_state` |
+| Checklist and launch | `Review` plus `readiness` and `primary_action` | The button shows only in the Review section |
+| Results, links, downloads | `Table` (schema 2) | Cells are text, `href` links, or `artifact` descriptors opened through `artifact.get` |
+
+Plan the screen over the life of the job:
+
+- **No domain object yet:** one `editable` section that creates or selects it, the others `hidden`, one `blocked` readiness line.
+- **Setup:** setup sections `editable`; primary action is the launch, `disabled` until readiness is all `ok`.
+- **Running:** setup sections `read_only`, result sections visible, primary action changes (for example "Close", with a `confirmation`).
+- **Finished:** `primary_action: null`, sections `read_only`.
+
+Also:
+
+- Return `job_state` from the actions that change cases or display labels.
+- Studio refuses workspace-scoped or mission-scoped actions through a job binding. Declare job-scoped twins of resource mutations; only read-only `list` and `get` lookups cross the boundary.
+- Derive the revision from saved state only (a counter or a hash). Display data and read-only events must not change it.
+- For a refusal other than a conflict, return `status="error"` with an effect that carries a `message`.
+- Hide or omit data the operator must not see (for example transcripts of an anonymized campaign): the agent decides, Studio only renders.
+
+## Analytics Dashboards
+
+Use them when the agent has data worth charting. Follow https://docs.runwaize.com/docs/supervaizer-controller/job-analytics and copy from Hello World `agent_dashboard.py`.
+
+1. Declare each dataset in `datasets=[...]`. The SDK derives `dataset.<id>.query` (`mutating=False`).
+2. Declare `job.analytics` for a **Job Analytics** section on every job page, `mission.analytics` for the mission page **Analytics** link, or both. One builder can serve the two.
+3. The surface returns `{"type": "Dashboard", "id", "title", "datasets", "controls", "widgets", "state"}`.
+4. A dataset entry has `id`, `label`, `input`, `display.columns` and `metrics`. Each metric is a KPI card with a `reducer`: `row_count`, `sum`, `avg`, `max`, `distinct_count` (need `field`) or `ratio` (`numerator_field`, `denominator_field`); optional `suffix`.
+5. Controls are `segmented` (with `options` and `default`) or `date`. Studio adds each value to every dataset query under the control `id`.
+6. Widgets are charts: `data: {"mode": "ref", "datasetId": ...}` or inline `data.values`, `layout: {"w", "h"}` on a 12-column grid, and `visualization: {"type": "vega-lite", "spec": {...}}`. Studio renders only `vega-lite` widgets with a `spec`.
+7. The query handler returns `{"type": "dataset.queried", "dataset": "<id>", "count": n, "rows": [...]}` as an effect. Its input is the job's start fields, then the dataset `input`, then the control values.
+8. For `job.analytics`, resolve the domain object from `job_id`, check it against the verified workspace, and scope every dataset through its `input`. Default to the whole life of the job. The job page shows KPI cards and charts; dataset tables show on the mission page only.
 
 ## Output Expectations
 
