@@ -1,32 +1,23 @@
-# Supervaizer Integration
+# Supervaizer Integration (moved)
 
-Integrate an existing Python agent with [Supervaizer v2](https://github.com/supervaize/supervaizer) and [Supervaize Studio](https://supervaize.com).
+This skill now lives in the Supervaizer SDK repository and is released with the SDK:
 
-This skill targets Supervaizer v2 only. It generates A2A JSON-RPC + A2UI controller scaffolding with Jobs, Cases, Steps, Resources, Surfaces, Actions, and `job.sync` semantics. It does not scaffold v1 job fields, `dynamic_choices`, `job_poll`, or ACP routes.
+https://github.com/supervaize/supervaizer/tree/main/skills/supervaizer-integration
+
+It moved so that the skill, the SDK docs and the SDK examples always have the same version.
 
 ## Install
 
-In Claude Code:
+In Claude Code, either marketplace works:
+
+```
+/plugin marketplace add supervaize/supervaizer
+/plugin install supervaizer-integration
+```
 
 ```
 /plugin marketplace add runwaize/runwaize_skills
-/plugin install supervaizer_integration
+/plugin install supervaizer-integration
 ```
 
-Or manually:
-
-```bash
-git clone https://github.com/runwaize/runwaize_skills.git
-```
-
-Then point your coding agent to the skill definition in [`SKILL.md`](./SKILL.md).
-
-## Documentation
-
-Core protocol docs:
-
-- Supervaizer v2: `RUNWAIZE/supervaizer/docs/2026_05_SUPERVAIZER_v2.md`
-- Protocols: `RUNWAIZE/supervaizer/docs/2026_05_PROTOCOLS.md`
-- Hello World example: https://github.com/supervaize/supervaize_hello_world
-
-Full skill documentation: https://docs.runwaize.com/docs/integrations/skills/supervaizer-integration
+The second form installs the same files: this marketplace points to the SDK repository.
