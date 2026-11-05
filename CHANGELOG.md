@@ -33,27 +33,24 @@ _No changes yet._
 
 _No changes yet._
 
-### [2.1.0] - 2026-11-05
+### [2.1.0] - 2026-11-06
 
-Updated for Supervaizer SDK 1.1 to 1.9.
-
-#### Added
-
-- `SKILL.md`: runtime rules (action metadata, top-level `job_state`, job cost, idempotency, verified workspace context, mission context), a table of optional capabilities with the SDK release of each (human in the loop, file fields, workspace binding, agent actions, `context.assign`, job setup policy, labels, rule checkpoints, scheduled start, introduction, full description, guided setup, billable consumption), a Job Configurator section, and a Studio connection step with the workspace authorization variables.
-- `SKILL.md`: a component-by-need table and a life-of-the-job plan for the Job Configurator (checked against the Aidan interviewer agent), and an Analytics Dashboards section for `job.analytics` and `mission.analytics`.
-- `SKILL.md`: a Guided Setup section (job name in the preview input, read-only help actions with `target_field`, cost estimate units) and the required `select` behaviour.
-- Scaffold: `job.stop` action, an in-memory job store so `job.sync` and a retried `job.start` return the original `job_state`, and `integration.scheduled_start` in the spec.
-- Scaffold: local mode. With `SUPERVAIZER_LOCAL_MODE=true` the generated controller starts without a Studio account.
+The skill no longer holds its own copy of the contract or of the controller code. The SDK, its docs and the Hello World example are the only sources, so the skill cannot drift from them.
 
 #### Changed
 
-- Reference links point to the public SDK docs instead of local paths.
-- Scaffold registration uses the short `build_v2_agent_registration` form (no `agent_id`, `controller_url` or `agent_card_url`).
+- `SKILL.md` holds the process and the design questions only. A "Sources Of Truth" table and the capability table point to the SDK scaffold, the SDK docs, the Configure and analytics guides, and the Hello World files. Contract details (field names, document shapes, environment variables) are removed.
+- `scaffold-integration` runs the SDK's own `supervaizer scaffold`, then prints a checklist built from the spec; each item names the reference to copy from. It needs the `supervaizer` command in the environment.
+- New capabilities covered by reference: Job Configurator, job and mission analytics, guided setup, scheduled start, rule checkpoints, workspace binding, billable consumption.
+
+#### Removed
+
+- The helper's controller and handler code templates (about 480 lines) and the `--workflow-filename` option. The templates had drifted: the generated controller failed to import on SDK 1.9.
 
 #### Fixed
 
-- The generated controller failed to import on SDK 1.9: artifact types are keyed by `type`, and `capabilities.actions` holds `V2ActionDefinition` objects, so handlers are registered with `action.id`. A spec that still uses `id` for an artifact type is converted.
 - `load-surface` and `invoke-action` sent `actor.id`; the contract requires `actor.user_id`.
+- The spec template keys an artifact type by `type`.
 
 ### [2.0.0] - 2026-05-17
 

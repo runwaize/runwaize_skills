@@ -2,7 +2,7 @@
 
 Integrate an existing Python agent with [Supervaizer v2](https://github.com/supervaize/supervaizer) and [Supervaize Studio](https://supervaize.com).
 
-This skill targets Supervaizer v2 only. It generates A2A JSON-RPC + A2UI controller scaffolding with Jobs, Cases, Steps, Resources, Surfaces, Actions, and `job.sync` semantics. It does not scaffold v1 job fields, `dynamic_choices`, `job_poll`, or ACP routes.
+This skill targets Supervaizer v2 only. It guides the Job/Case/Step/Resource/Surface/Action mapping, then builds the controller from the SDK's own `supervaizer scaffold`, its reference docs and the Hello World example. It does not scaffold v1 job fields, `dynamic_choices`, `job_poll`, or ACP routes.
 
 ## Install
 
@@ -28,8 +28,9 @@ Core protocol docs:
 - Supervaizer v2: https://github.com/supervaize/supervaizer/blob/main/docs/2026_05_SUPERVAIZER_v2.md
 - Protocols: https://github.com/supervaize/supervaizer/blob/main/docs/2026_05_PROTOCOLS.md
 - Job Configurator (Configure screen): https://docs.runwaize.com/docs/supervaizer-controller/job-configurator
+- Job and mission analytics: https://docs.runwaize.com/docs/supervaizer-controller/job-analytics
 - Hello World example: https://github.com/runwaize/supervaize_hello_world
 
-The skill targets Supervaizer 1.9 or later. It covers workspace authorization, local mode, action metadata, human in the loop, resources, dashboards, scheduled start, rule checkpoints, the Job Configurator, guided setup and billable consumption.
+The skill holds the integration process and the design questions. For the contract and the code patterns it points to the SDK scaffold, the SDK docs, the guides above and the Hello World example, so it stays in step with the installed SDK.
 
 Full skill documentation: https://docs.runwaize.com/docs/integrations/skills/supervaizer-integration
