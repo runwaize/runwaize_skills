@@ -33,6 +33,12 @@ _No changes yet._
 
 _No changes yet._
 
+### [3.0.0] - 2026-11-06
+
+#### Changed
+
+- In the SDK repository, the skill now interviews the developer in rounds about the mission, job, case and step mapping, and builds the integration topic by topic from the guides at docs.runwaize.com. The marketplace entry follows that version.
+
 ### [2.2.0] - 2026-11-06
 
 #### Changed
