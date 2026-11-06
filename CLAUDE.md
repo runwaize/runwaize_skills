@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Dual-skill CLI helper system for the Supervaize platform, providing two standalone Typer-based Python CLI tools:
 
 1. **supervaizer_integration** — Guides developers through integrating Python agents with the Supervaizer controller. Workflow: discovery questions → JSON spec → code scaffold → customize.
-2. **supervaize_access** — Enables chatbots/CLI agents to interact with Supervaize SaaS workspaces via three backends: REST API, MCP HTTP endpoint, and local Supervaizer controller.
+2. **supervaize_access** — Tells chatbots/CLI agents how to operate a Supervaize workspace: the Supervaize MCP connector (OAuth) for missions, jobs and cases, and a helper for the REST routes that accept an API key (agents, controller events).
 
 ## Running the Tools
 
@@ -41,13 +41,13 @@ Only external dependency: `typer` (`pip install typer`).
 - **Specification-driven code generation**: JSON spec defines job/case/step mapping for CLI-based scaffolding
 - Key commands: `questions`, `spec-template`, `wizard`, `analyze-agent`, `scaffold-integration`, `env-status`, `discover-controller`, `trigger-job`
 
-### supervaize_access (1,474 lines)
+### supervaize_access
 
-- **Multi-backend**: Commands gracefully degrade when a backend (REST/MCP/Controller) is unavailable, returning structured explanations
+- **REST only**: the helper calls the agents and `ctrl-events` routes with an API key. It has no MCP client; the chat client connects the Supervaize MCP connector itself
 - **Profile-based config**: Credentials persisted in `~/.supervaize_access/profile.json` (or `$CODEX_HOME/supervaize_access/profile.json`)
 - **Config resolution chain**: CLI arg → env var → profile file → None
 - **Event-driven status**: Reconstructs job/case/step status from controller event streams
-- Key commands: `register-to-supervaize`, `list-agents`, `resolve-agent`, `create-mission`, `show-missions-for-agent`, `job-status-for-agent`, `view-cases-steps`, `start-job`, `mcp-tools`, `mcp-call`
+- Commands: `questions`, `env-status`, `register-to-supervaize`, `list-agents`, `job-status-for-agent`, `view-cases-steps`
 
 ## Skill Definitions
 

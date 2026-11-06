@@ -37,7 +37,7 @@
       "name": "supervaize-access",
       "source": "./supervaize_access",
       "description": "Operate against an existing Supervaize workspace from a chatbot or CLI agent",
-      "version": "0.1.0",
+      "version": "2.0.0",
       "author": {
         "name": "Runwaize"
       },
