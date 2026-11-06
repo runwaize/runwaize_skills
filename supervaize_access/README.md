@@ -1,6 +1,6 @@
 # Supervaize Access
 
-Operate against an existing [Supervaize](https://supervaize.com) workspace from a chatbot or CLI agent. Register, create missions, start jobs, inspect cases/steps, and check job status.
+Operate against an existing [Supervaize](https://supervaize.com) workspace from a chatbot or CLI agent. The skill uses the Supervaize MCP connector for missions, jobs, cases and human answers. Its helper reads agents and controller events with an API key.
 
 ## Install
 
@@ -21,4 +21,4 @@ Then point your coding agent to the skill definition in [`SKILL.md`](./SKILL.md)
 
 ## Documentation
 
-Full documentation: https://docs.runwaize.com/docs/integrations/skills/
+Full documentation: https://docs.runwaize.com/docs/integrations/skills/supervaize-access

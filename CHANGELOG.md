@@ -15,6 +15,22 @@ Each skill/tool is versioned independently below.
 
 _No changes yet._
 
+### [2.0.0] - 2026-11-06
+
+The skill described a Studio MCP endpoint and REST routes that do not exist. It now uses only what Studio accepts.
+
+#### Changed
+
+- `SKILL.md` maps each request to a tool of the Supervaize MCP connector (`{base_url}/mcp/{workspace}`, OAuth) or to a helper command. Missions, jobs, cases and human answers go through the connector.
+- `register-to-supervaize` validates the key and the workspace with one page of agents. Before, it called `/w/api/teams/`, which is not a route.
+- `reference.md` lists the two REST route groups that accept an API key (agents, controller events) and the connector tools.
+
+#### Removed
+
+- `create-mission` and `show-missions-for-agent`: Studio has no mission route for an API key. Use the connector tools `mission_create` and `mission_list`.
+- `start-job`: the connector tool `job_setup` starts a job.
+- `mcp-tools`, `mcp-call`, `view-cases-steps --backend mcp` and the `--mcp-url` option: they called `{api_url}/api/mcp`, which Studio removed, and sent no credentials. The agent runtime endpoint (`/mcp/agent/{workspace}`) needs a runtime grant token, which a chatbot user does not have.
+
 ### [1.0.0] - 2026-03-12
 
 #### Added

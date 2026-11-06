@@ -1,78 +1,44 @@
-# Supervaize workspace API — reference
+# Supervaize workspace access: reference
 
-Base URL placeholder: `{base}` = `{base_url}/w/{team_slug}/api/v1/`. Auth: `Api-Key: <key>`.
+## REST routes that accept an API key
 
-## REST paths
+Base: `{base}` = `{base_url}/w/{workspace}/api/v1/`. Header: `Authorization: Api-Key <key>`. Add the header `workspace: <workspace slug>` for the controller events.
 
-### Agents
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `{base}agents/` | List agents (paginated) |
+| GET | `{base}agents/{id}/` | Retrieve an agent by ID |
+| GET | `{base}agents/by-slug/{slug}/` | Retrieve an agent by slug |
+| GET | `{base}ctrl-events/` | List controller events (slim list) |
+| GET | `{base}ctrl-events/{id}/` | Retrieve a controller event (full details) |
 
-| Method | Path                           | Description                       |
-| ------ | ------------------------------ | --------------------------------- |
-| GET    | `{base}agents/`                | List agents (paginated)           |
-| POST   | `{base}agents/`                | Create agent                      |
-| GET    | `{base}agents/{id}/`           | Retrieve agent by ID (hex string) |
-| GET    | `{base}agents/by-slug/{slug}/` | Retrieve agent by slug            |
-| PUT    | `{base}agents/{id}/`           | Full update                       |
-| PATCH  | `{base}agents/{id}/`           | Partial update                    |
-| DELETE | `{base}agents/{id}/`           | Delete agent                      |
+The user of the key must be a member of the workspace, and the workspace needs an active subscription.
 
-Create/update body (AgentSerializer): id (read-only), name, slug, alias, server, status, onboarding_status, tags, deployment_config, methods, parameters_setup_definition (read-only).
+No other route accepts an API key for a chatbot. The mission, job and case routes need a signed-in Studio session.
 
-### Missions
+## MCP connector (user tools)
 
-| Method | Path                   | Description               |
-| ------ | ---------------------- | ------------------------- |
-| GET    | `{base}missions/`      | List missions (paginated) |
-| POST   | `{base}missions/`      | Create mission            |
-| GET    | `{base}missions/{id}/` | Retrieve mission          |
-| PUT    | `{base}missions/{id}/` | Full update               |
-| PATCH  | `{base}missions/{id}/` | Partial update            |
-| DELETE | `{base}missions/{id}/` | Delete mission            |
+Endpoint: `{base_url}/mcp/{workspace}`. Authentication: OAuth sign-in and consent in the chat client. An API key is not accepted.
 
-Create/update body (MissionSerializer): id, team_id, name, description, budget, status, priority, start_date, end_date.
+| Area | Tools |
+| --- | --- |
+| Workspace | `workspace_info`, `catalog` |
+| Agents | `agent_list`, `agent_action_invoke` |
+| Missions | `mission_list`, `mission_get`, `mission_stats`, `mission_create` |
+| Jobs | `job_list`, `job_get`, `job_setup`, `job_sync` |
+| Cases and steps | `case_list`, `case_get`, `step_submit` |
+| Agent data | `resource_list`, `resource_get`, `artifact_get` |
+| Schedules | `schedule_list`, `schedule_get`, `schedule_create`, `schedule_update`, `schedule_pause`, `schedule_resume`, `schedule_run_now`, `schedule_delete` |
 
-### Controller events (integration)
+The connector gives the arguments of each tool. `agent_action_invoke`, `schedule_run_now` and `schedule_delete` are marked destructive: confirm with the user first.
 
-| Method | Path                      | Description                        |
-| ------ | ------------------------- | ---------------------------------- |
-| GET    | `{base}ctrl-events/`      | List controller events (slim list) |
-| POST   | `{base}ctrl-events/`      | Create (e.g. server registration)  |
-| GET    | `{base}ctrl-events/{id}/` | Retrieve (full details)            |
+Installation and consent: https://docs.runwaize.com/docs/supervaize-fleet/mcp-connector/install
 
-## MCP tools (inputSchema summary)
+## Agent runtime endpoint (not used by this skill)
 
-Endpoint: `{base_url}/api/mcp/`. Auth: `Api-Key: <key>` or `Authorization: Bearer <token>` (n8n).
+`{base_url}/mcp/agent/{workspace}` is for a workflow runtime such as n8n. It needs the Bearer token of a runtime grant. Its tools report cases and steps: `report_case_start`, `report_case_step`, `request_human_input`, `get_case_status`, `report_case_status`, `register_agent_parameters`. See https://docs.runwaize.com/docs/integrations/n8n-integration
 
-### report_case_start
-
-- **Required**: job_id (string), execution_id (string), team_slug (string).
-- **Optional**: name (string), description (string).
-
-### report_case_step
-
-- **Required**: execution_id (string), team_slug (string).
-- **Optional**: index (integer), name (string), payload (object), cost (number), is_final (boolean), error (string).
-
-### request_human_input
-
-- **Required**: execution_id (string), team_slug (string), form_fields (array of { name, field_type?, description?, required? }).
-- **Optional**: step_index (integer), message (string).
-
-### get_case_status
-
-- **Required**: execution_id (string), team_slug (string).
-- **Optional**: correlation_id (string).
-
-### report_case_status
-
-- **Required**: execution_id (string), team_slug (string), status (string, enum: started, waiting, resumed, completed, failed, terminated).
-- **Optional**: error_message (string), correlation_id (string).
-
-### register_agent_parameters
-
-- **Required**: workflow_id (string), team_slug (string), parameters (array of { name, description?, is_secret?, is_required?, default_value? }).
-
-## OpenAPI / docs
+## OpenAPI
 
 - Schema: `{base_url}/api/doc`
 - Swagger UI: `{base_url}/api/doc/swagger-ui/`

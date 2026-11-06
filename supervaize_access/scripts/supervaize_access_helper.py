@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Chatbot access helper for interacting with Supervaize SaaS via REST API and MCP."""
+"""Chatbot access helper for the Supervaize REST routes that accept a user API key.
+
+Only two route groups accept `Authorization: Api-Key`: the agents (read-only) and the
+controller events (`ctrl-events`). Missions, jobs, cases and human answers go through the
+Supervaize MCP connector, which the chatbot connects with OAuth. This helper cannot do that.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +14,6 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +37,7 @@ app = typer.Typer(
     add_completion=False,
     no_args_is_help=True,
     context_settings={"help_option_names": ["-h", "--help"]},
-    help="Supervaize SaaS access helper for chatbots (REST API + MCP).",
+    help="Supervaize SaaS access helper for chatbots (REST API with a user API key).",
 )
 
 
@@ -101,18 +105,12 @@ def _resolve_value(arg_value: str | None, env_name: str, profile: dict[str, Any]
     return arg_value or os.getenv(env_name) or _profile_value(profile, profile_key)
 
 
-def _resolve_value_arg_profile_only(arg_value: str | None, profile: dict[str, Any], profile_key: str) -> str | None:
-    """Resolve from CLI arg or profile only (no env). Used for MCP URL."""
-    return arg_value or _profile_value(profile, profile_key)
-
-
 def _resolve_access_config(
     *,
     profile_path: str | None,
     api_key: str | None = None,
     workspace_id: str | None = None,
     api_url: str | None = None,
-    mcp_url: str | None = None,
 ) -> dict[str, Any]:
     profile = _load_profile(profile_path)
     cfg = {
@@ -121,14 +119,9 @@ def _resolve_access_config(
         "api_key": _resolve_value(api_key, ENV_SAAS_API_KEY, profile, "api_key"),
         "workspace_id": _resolve_value(workspace_id, ENV_SAAS_WORKSPACE, profile, "workspace_id"),
         "api_url": _resolve_value(api_url, ENV_SAAS_API_URL, profile, "api_url"),
-        "mcp_url": _resolve_value_arg_profile_only(mcp_url, profile, "mcp_url"),
     }
     if cfg["api_url"]:
         cfg["api_url"] = _normalize_url(str(cfg["api_url"]))
-    if cfg["mcp_url"]:
-        cfg["mcp_url"] = _normalize_url(str(cfg["mcp_url"]))
-    elif cfg["api_url"]:
-        cfg["mcp_url"] = _normalize_url(cfg["api_url"]) + "/api/mcp"
     return cfg
 
 
@@ -136,13 +129,6 @@ def _require_saas(cfg: dict[str, Any]) -> None:
     missing = [name for name, val in (("api_key", cfg.get("api_key")), ("workspace_id", cfg.get("workspace_id")), ("api_url", cfg.get("api_url"))) if not val]
     if missing:
         raise ValueError(f"Missing Supervaize SaaS config: {', '.join(missing)}")
-
-
-def _require_mcp(cfg: dict[str, Any]) -> None:
-    if not cfg.get("mcp_url"):
-        raise ValueError(
-            "Missing MCP URL. Set --mcp-url or register profile; or set api_url so MCP URL is derived as api_url/api/mcp."
-        )
 
 
 def _http_json(
@@ -226,66 +212,6 @@ def _paginate_rest(
     return {"items": items, "pages_fetched": pages, "truncated": bool(next_url), "next": next_url}
 
 
-def _mcp_rpc(mcp_url: str, method: str, params: dict[str, Any] | None, timeout_seconds: int) -> dict[str, Any]:
-    rpc_id = str(uuid.uuid4())
-    payload = {
-        "jsonrpc": "2.0",
-        "id": rpc_id,
-        "method": method,
-    }
-    if params is not None:
-        payload["params"] = params
-    _, response = _http_json(
-        "POST",
-        mcp_url,
-        body=payload,
-        headers={"Accept": "application/json", "Content-Type": "application/json"},
-        timeout=timeout_seconds,
-    )
-    if not isinstance(response, dict):
-        raise ValueError("Unexpected MCP response shape")
-    return response
-
-
-def _mcp_extract_text_content(response: dict[str, Any]) -> Any:
-    if response.get("error"):
-        return {"mcp_error": response["error"]}
-    result = response.get("result")
-    if not isinstance(result, dict):
-        return result
-    content = result.get("content")
-    if not isinstance(content, list):
-        return result
-    texts: list[Any] = []
-    for item in content:
-        if isinstance(item, dict) and item.get("type") == "text":
-            text = item.get("text")
-            if not isinstance(text, str):
-                texts.append(text)
-                continue
-            try:
-                texts.append(json.loads(text))
-            except json.JSONDecodeError:
-                texts.append(text)
-        else:
-            texts.append(item)
-    return texts
-
-
-def _load_params(params_json: str | None, params_file: str | None) -> dict[str, Any]:
-    if params_json and params_file:
-        raise ValueError("Use only one of --params-json or --params-file")
-    if params_file:
-        payload = _read_json_file(params_file)
-    elif params_json:
-        payload = json.loads(params_json)
-    else:
-        payload = {}
-    if not isinstance(payload, dict):
-        raise ValueError("Params payload must be a JSON object")
-    return payload
-
-
 def _handle(pretty: bool, fn: Any, *args: Any, **kwargs: Any) -> None:
     try:
         fn(*args, **kwargs)
@@ -314,7 +240,8 @@ def _questions_payload() -> dict[str, Any]:
         "questions": [
             "Which Supervaize workspace/team slug should I use?",
             "Do you already have SUPERVAIZE_API_KEY / SUPERVAIZE_API_URL?",
-            "For case/step viewing: do you have a job_id, case_id, or n8n execution_id?",
+            "For case/step viewing: do you have a job_id or a case_id?",
+            "Is the Supervaize MCP connector connected in this chat client? Missions, jobs and cases need it.",
             "For agent-specific queries: what is the agent_slug (preferred)?",
         ],
     }
@@ -345,7 +272,6 @@ def _env_status_impl(profile_path: str | None, shell_template: bool, pretty: boo
                 "api_key": _mask_secret(cfg.get("api_key")),
                 "workspace_id": cfg.get("workspace_id"),
                 "api_url": cfg.get("api_url"),
-                "mcp_url": cfg.get("mcp_url"),
             },
         },
         pretty=pretty,
@@ -357,10 +283,8 @@ def _register_to_supervaize_impl(
     api_key: str | None,
     workspace_id: str | None,
     api_url: str | None,
-    mcp_url: str | None,
     save_profile: bool,
     timeout_seconds: int,
-    page_limit: int,
     pretty: bool,
 ) -> None:
     cfg = _resolve_access_config(
@@ -368,29 +292,17 @@ def _register_to_supervaize_impl(
         api_key=api_key,
         workspace_id=workspace_id,
         api_url=api_url,
-        mcp_url=mcp_url,
     )
     _require_saas(cfg)
 
-    teams_url = _saas_url(cfg, "/w/api/teams/")
-    teams_result = _paginate_rest(
-        teams_url,
-        headers=_api_headers(str(cfg["api_key"])),
+    # The agents route accepts a user API key and checks workspace membership, so one
+    # page proves the key, the URL and the workspace slug together. A wrong value raises.
+    agents_result = _paginate_rest(
+        _saas_url(cfg, f"/w/{cfg['workspace_id']}/api/v1/agents/"),
+        headers=_api_headers(str(cfg["api_key"]), str(cfg["workspace_id"])),
         timeout_seconds=timeout_seconds,
-        page_limit=page_limit,
-        item_limit=200,
+        page_limit=1,
     )
-    teams = teams_result["items"]
-
-    workspace_match = None
-    for team in teams:
-        if not isinstance(team, dict):
-            continue
-        if str(team.get("slug") or "") == str(cfg["workspace_id"]):
-            workspace_match = team
-            break
-        if str(team.get("name") or "") == str(cfg["workspace_id"]):
-            workspace_match = team
 
     saved_to = None
     if save_profile:
@@ -400,7 +312,6 @@ def _register_to_supervaize_impl(
                 "api_key": cfg.get("api_key"),
                 "workspace_id": cfg.get("workspace_id"),
                 "api_url": cfg.get("api_url"),
-                "mcp_url": cfg.get("mcp_url"),
             },
         )
 
@@ -410,18 +321,13 @@ def _register_to_supervaize_impl(
             "operation": "register-to-supervaize",
             "workspace_id": cfg.get("workspace_id"),
             "api_url": cfg.get("api_url"),
-            "validated": {
-                "teams_list_access": True,
-                "workspace_match_found": bool(workspace_match),
-            },
-            "workspace_match": workspace_match,
-            "teams_count_seen": len(teams),
-            "teams_pages_fetched": teams_result.get("pages_fetched"),
+            "validated": {"workspace_agents_access": True},
+            "agents_seen_on_first_page": len(agents_result["items"]),
             "saved_profile": bool(save_profile),
             "saved_to": saved_to,
             "notes": [
-                "Registration here means local chatbot session/profile registration to a Supervaize workspace using API credentials.",
-                "If workspace_match_found is false, verify SUPERVAIZE_WORKSPACE_ID/team slug and API key access scope.",
+                "Registration here means a local profile for this chatbot session. It creates nothing in Supervaize.",
+                "The API key reads agents and controller events only. Use the Supervaize MCP connector for missions, jobs, cases and human answers.",
             ],
         },
         pretty=pretty,
@@ -498,165 +404,6 @@ def _resolve_agent_impl(
         if agent_name and str(item.get("name")) == agent_name:
             return item
     raise ValueError("Agent not found with provided identifier(s)")
-
-
-def _create_mission_impl(
-    profile_path: str | None,
-    api_key: str | None,
-    workspace_id: str | None,
-    api_url: str | None,
-    name: str,
-    description: str | None,
-    budget: str | None,
-    status_value: str | None,
-    priority: str | None,
-    start_date: str | None,
-    end_date: str | None,
-    timeout_seconds: int,
-    dry_run: bool,
-    pretty: bool,
-) -> None:
-    cfg = _resolve_access_config(profile_path=profile_path, api_key=api_key, workspace_id=workspace_id, api_url=api_url)
-    _require_saas(cfg)
-    body: dict[str, Any] = {"name": name}
-    if description is not None:
-        body["description"] = description
-    if budget is not None:
-        body["budget"] = budget
-    if status_value is not None:
-        body["status"] = status_value
-    if priority is not None:
-        body["priority"] = priority
-    if start_date is not None:
-        body["start_date"] = start_date
-    if end_date is not None:
-        body["end_date"] = end_date
-
-    url = _saas_url(cfg, f"/w/{cfg['workspace_id']}/api/v1/missions/")
-    headers = _api_headers(str(cfg["api_key"]))
-    if dry_run:
-        _print_json(
-            {
-                "ok": True,
-                "operation": "create-mission",
-                "dry_run": True,
-                "endpoint": url,
-                "headers": {"Authorization": "Api-Key ***", "Content-Type": "application/json", "Accept": "application/json"},
-                "payload": body,
-            },
-            pretty=pretty,
-        )
-        return
-    status_code, response = _http_json("POST", url, body=body, headers=headers, timeout=timeout_seconds)
-    _print_json(
-        {
-            "ok": True,
-            "operation": "create-mission",
-            "status_code": status_code,
-            "request": body,
-            "response": response,
-        },
-        pretty=pretty,
-    )
-
-
-def _list_missions(cfg: dict[str, Any], timeout_seconds: int, page_limit: int) -> dict[str, Any]:
-    url = _saas_url(cfg, f"/w/{cfg['workspace_id']}/api/v1/missions/")
-    return _paginate_rest(
-        url,
-        headers=_api_headers(str(cfg["api_key"])),
-        timeout_seconds=timeout_seconds,
-        page_limit=page_limit,
-        item_limit=1000,
-    )
-
-
-def _mission_relation_keys_present(mission: dict[str, Any]) -> bool:
-    keys = {
-        "agent",
-        "agent_id",
-        "agent_slug",
-        "agents",
-        "agent_ids",
-        "agent_slugs",
-        "active_agents",
-    }
-    return any(k in mission for k in keys)
-
-
-def _matches_agent_token(value: Any, agent: dict[str, Any], agent_slug: str | None, agent_id: str | None, agent_name: str | None) -> bool:
-    tokens = {str(v) for v in [agent.get("id"), agent.get("slug"), agent.get("name"), agent.get("alias"), agent_slug, agent_id, agent_name] if v}
-    if isinstance(value, dict):
-        return any(_matches_agent_token(v, agent, agent_slug, agent_id, agent_name) for v in value.values())
-    if isinstance(value, list):
-        return any(_matches_agent_token(v, agent, agent_slug, agent_id, agent_name) for v in value)
-    if value is None:
-        return False
-    return str(value) in tokens
-
-
-def _show_missions_for_agent_impl(
-    profile_path: str | None,
-    api_key: str | None,
-    workspace_id: str | None,
-    api_url: str | None,
-    agent_slug: str | None,
-    agent_id: str | None,
-    agent_name: str | None,
-    timeout_seconds: int,
-    page_limit: int,
-    pretty: bool,
-) -> None:
-    cfg = _resolve_access_config(profile_path=profile_path, api_key=api_key, workspace_id=workspace_id, api_url=api_url)
-    _require_saas(cfg)
-    agent = _resolve_agent_impl(
-        cfg,
-        agent_slug=agent_slug,
-        agent_id=agent_id,
-        agent_name=agent_name,
-        timeout_seconds=timeout_seconds,
-        page_limit=page_limit,
-    )
-    missions_result = _list_missions(cfg, timeout_seconds=timeout_seconds, page_limit=page_limit)
-    missions = [m for m in missions_result["items"] if isinstance(m, dict)]
-
-    relation_fields_present = any(_mission_relation_keys_present(m) for m in missions)
-    if not relation_fields_present:
-        _print_json(
-            {
-                "ok": False,
-                "operation": "show-missions-for-agent",
-                "workspace_id": cfg.get("workspace_id"),
-                "agent": agent,
-                "limitation": {
-                    "reason": "Public mission API responses do not expose agent linkage fields in this spec/response shape.",
-                    "api_endpoint": f"/w/{cfg['workspace_id']}/api/v1/missions/",
-                    "suggestions": [
-                        "Use an internal endpoint that exposes mission-agent associations.",
-                        "Extend the public API serializer to include mission.agents.",
-                        "Provide a separate mapping source to the chatbot (mission IDs per agent).",
-                    ],
-                },
-                "missions_seen": len(missions),
-            },
-            pretty=pretty,
-        )
-        return
-
-    filtered = [m for m in missions if _matches_agent_token(m, agent, agent_slug, agent_id, agent_name)]
-    _print_json(
-        {
-            "ok": True,
-            "operation": "show-missions-for-agent",
-            "workspace_id": cfg.get("workspace_id"),
-            "agent": agent,
-            "missions": filtered,
-            "missions_count": len(filtered),
-            "missions_scanned": len(missions),
-            "matching_mode": "relation-field-filter",
-        },
-        pretty=pretty,
-    )
 
 
 def _list_ctrl_events(
@@ -908,45 +655,6 @@ def _view_cases_steps_api_impl(
     )
 
 
-def _view_cases_steps_mcp_impl(
-    cfg: dict[str, Any],
-    *,
-    execution_id: str,
-    team_slug: str | None,
-    correlation_id: str | None,
-    timeout_seconds: int,
-    pretty: bool,
-) -> None:
-    _require_mcp(cfg)
-    team = team_slug or cfg.get("workspace_id")
-    if not team:
-        raise ValueError("Provide --team-slug or set SUPERVAIZE_WORKSPACE_ID")
-    params = {
-        "name": "get_case_status",
-        "arguments": {
-            "execution_id": execution_id,
-            "team_slug": team,
-        },
-    }
-    if correlation_id:
-        params["arguments"]["correlation_id"] = correlation_id
-    response = _mcp_rpc(str(cfg["mcp_url"]), "tools/call", params, timeout_seconds=timeout_seconds)
-    parsed = _mcp_extract_text_content(response)
-    _print_json(
-        {
-            "ok": "error" not in response,
-            "operation": "view-cases-steps",
-            "backend": "mcp",
-            "mcp_url": cfg.get("mcp_url"),
-            "tool": "get_case_status",
-            "arguments": params["arguments"],
-            "mcp_response": response,
-            "parsed_content": parsed,
-        },
-        pretty=pretty,
-    )
-
-
 def _job_status_for_agent_impl(
     profile_path: str | None,
     api_key: str | None,
@@ -1019,71 +727,6 @@ def _job_status_for_agent_impl(
     )
 
 
-def _start_job_impl(pretty: bool) -> None:
-    """Job start is not exposed via public REST or MCP; return structured limitation."""
-    _print_json(
-        {
-            "ok": False,
-            "operation": "start-job",
-            "limitation": {
-                "reason": "Current public Supervaize REST API and MCP do not expose a generic job-start command.",
-                "suggestions": [
-                    "Start jobs via the Studio UI or via a Supervaizer (use supervaizer_integration skill for agent-side).",
-                    "For telemetry only, emit controller events to Studio via /ctrl-events.",
-                ],
-            },
-        },
-        pretty=pretty,
-    )
-
-
-def _mcp_tools_impl(profile_path: str | None, mcp_url: str | None, timeout_seconds: int, pretty: bool) -> None:
-    cfg = _resolve_access_config(profile_path=profile_path, mcp_url=mcp_url)
-    _require_mcp(cfg)
-    response = _mcp_rpc(str(cfg["mcp_url"]), "tools/list", {}, timeout_seconds=timeout_seconds)
-    _print_json(
-        {
-            "ok": "error" not in response,
-            "operation": "mcp-tools",
-            "mcp_url": cfg.get("mcp_url"),
-            "response": response,
-        },
-        pretty=pretty,
-    )
-
-
-def _mcp_call_impl(
-    profile_path: str | None,
-    mcp_url: str | None,
-    tool_name: str,
-    arguments_json: str | None,
-    arguments_file: str | None,
-    timeout_seconds: int,
-    pretty: bool,
-) -> None:
-    cfg = _resolve_access_config(profile_path=profile_path, mcp_url=mcp_url)
-    _require_mcp(cfg)
-    arguments = _load_params(arguments_json, arguments_file)
-    response = _mcp_rpc(
-        str(cfg["mcp_url"]),
-        "tools/call",
-        {"name": tool_name, "arguments": arguments},
-        timeout_seconds=timeout_seconds,
-    )
-    _print_json(
-        {
-            "ok": "error" not in response,
-            "operation": "mcp-call",
-            "mcp_url": cfg.get("mcp_url"),
-            "tool": tool_name,
-            "arguments": arguments,
-            "mcp_response": response,
-            "parsed_content": _mcp_extract_text_content(response),
-        },
-        pretty=pretty,
-    )
-
-
 @app.command("questions")
 def questions(pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output.")) -> None:
     """Print the access-discovery questions to ask before acting."""
@@ -1106,10 +749,8 @@ def register_to_supervaize(
     api_key: str | None = typer.Option(None, "--api-key", help="Supervaize API key (or use SUPERVAIZE_API_KEY)."),
     workspace_id: str | None = typer.Option(None, "--workspace-id", help="Workspace/team slug (or use SUPERVAIZE_WORKSPACE_ID)."),
     api_url: str | None = typer.Option(None, "--api-url", help="Base API URL (or use SUPERVAIZE_API_URL)."),
-    mcp_url: str | None = typer.Option(None, "--mcp-url", help="Optional MCP HTTP endpoint to save in profile."),
     save_profile: bool = typer.Option(True, "--save-profile/--no-save-profile", help="Persist resolved values for future commands."),
     timeout_seconds: int = typer.Option(DEFAULT_TIMEOUT, "--timeout-seconds", help="HTTP timeout in seconds."),
-    page_limit: int = typer.Option(DEFAULT_PAGE_LIMIT, "--page-limit", help="Max pages to scan when validating workspace/team access."),
     pretty: bool = typer.Option(False, "--pretty", help="Pretty-print JSON output."),
 ) -> None:
     """Validate SaaS access and register local chatbot profile for a workspace."""
@@ -1120,10 +761,8 @@ def register_to_supervaize(
         api_key,
         workspace_id,
         api_url,
-        mcp_url,
         save_profile,
         timeout_seconds,
-        page_limit,
         pretty,
     )
 
@@ -1140,74 +779,6 @@ def list_agents(
 ) -> None:
     """List agents in the Supervaize workspace (REST API)."""
     _handle(pretty, _list_agents_impl, profile_path, api_key, workspace_id, api_url, page_limit, timeout_seconds, pretty)
-
-
-@app.command("create-mission")
-def create_mission(
-    name: str = typer.Option(..., "--name", help="Mission name."),
-    description: str | None = typer.Option(None, "--description", help="Mission description."),
-    budget: str | None = typer.Option(None, "--budget", help="Budget decimal string, e.g. 1000.00"),
-    status_value: str | None = typer.Option(None, "--status", help="Mission status (draft, in_progress, completed, on_hold, cancelled)."),
-    priority: str | None = typer.Option(None, "--priority", help="Mission priority enum value if supported."),
-    start_date: str | None = typer.Option(None, "--start-date", help="YYYY-MM-DD"),
-    end_date: str | None = typer.Option(None, "--end-date", help="YYYY-MM-DD"),
-    profile_path: str | None = typer.Option(None, "--profile-path"),
-    api_key: str | None = typer.Option(None, "--api-key"),
-    workspace_id: str | None = typer.Option(None, "--workspace-id"),
-    api_url: str | None = typer.Option(None, "--api-url"),
-    timeout_seconds: int = typer.Option(DEFAULT_TIMEOUT, "--timeout-seconds"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print payload without sending."),
-    pretty: bool = typer.Option(False, "--pretty"),
-) -> None:
-    """Create a mission in the Supervaize SaaS workspace (REST API)."""
-    _handle(
-        pretty,
-        _create_mission_impl,
-        profile_path,
-        api_key,
-        workspace_id,
-        api_url,
-        name,
-        description,
-        budget,
-        status_value,
-        priority,
-        start_date,
-        end_date,
-        timeout_seconds,
-        dry_run,
-        pretty,
-    )
-
-
-@app.command("show-missions-for-agent")
-def show_missions_for_agent(
-    agent_slug: str | None = typer.Option(None, "--agent-slug", help="Agent slug (preferred)."),
-    agent_id: str | None = typer.Option(None, "--agent-id", help="Agent id (fallback if slug unknown)."),
-    agent_name: str | None = typer.Option(None, "--agent-name", help="Agent name (fallback if slug/id unknown)."),
-    profile_path: str | None = typer.Option(None, "--profile-path"),
-    api_key: str | None = typer.Option(None, "--api-key"),
-    workspace_id: str | None = typer.Option(None, "--workspace-id"),
-    api_url: str | None = typer.Option(None, "--api-url"),
-    timeout_seconds: int = typer.Option(DEFAULT_TIMEOUT, "--timeout-seconds"),
-    page_limit: int = typer.Option(DEFAULT_PAGE_LIMIT, "--page-limit"),
-    pretty: bool = typer.Option(False, "--pretty"),
-) -> None:
-    """Show missions for an agent if mission-agent linkage is exposed by the API response."""
-    _handle(
-        pretty,
-        _show_missions_for_agent_impl,
-        profile_path,
-        api_key,
-        workspace_id,
-        api_url,
-        agent_slug,
-        agent_id,
-        agent_name,
-        timeout_seconds,
-        page_limit,
-        pretty,
-    )
 
 
 @app.command("job-status-for-agent")
@@ -1244,92 +815,37 @@ def job_status_for_agent(
 
 @app.command("view-cases-steps")
 def view_cases_steps(
-    backend: str = typer.Option("api", "--backend", help="api or mcp"),
-    job_id: str | None = typer.Option(None, "--job-id", help="Filter ctrl-events reconstruction by job ID (api backend)."),
-    case_id: str | None = typer.Option(None, "--case-id", help="Filter ctrl-events reconstruction by case ID/ref (api backend)."),
-    execution_id: str | None = typer.Option(None, "--execution-id", help="n8n execution ID (mcp backend)."),
-    team_slug: str | None = typer.Option(None, "--team-slug", help="Workspace/team slug override for MCP get_case_status."),
-    correlation_id: str | None = typer.Option(None, "--correlation-id", help="Optional correlation ID for MCP get_case_status."),
+    job_id: str | None = typer.Option(None, "--job-id", help="Filter ctrl-events reconstruction by job ID."),
+    case_id: str | None = typer.Option(None, "--case-id", help="Filter ctrl-events reconstruction by case ID/ref."),
     profile_path: str | None = typer.Option(None, "--profile-path"),
     api_key: str | None = typer.Option(None, "--api-key"),
     workspace_id: str | None = typer.Option(None, "--workspace-id"),
     api_url: str | None = typer.Option(None, "--api-url"),
-    mcp_url: str | None = typer.Option(None, "--mcp-url"),
     timeout_seconds: int = typer.Option(DEFAULT_TIMEOUT, "--timeout-seconds"),
     page_limit: int = typer.Option(DEFAULT_PAGE_LIMIT, "--page-limit"),
     event_limit: int = typer.Option(DEFAULT_EVENT_LIMIT, "--event-limit"),
     pretty: bool = typer.Option(False, "--pretty"),
 ) -> None:
-    """View cases and steps via ctrl-events reconstruction (api) or MCP get_case_status (mcp)."""
+    """View cases and steps, rebuilt from the controller events (best effort)."""
     def runner() -> None:
         cfg = _resolve_access_config(
             profile_path=profile_path,
             api_key=api_key,
             workspace_id=workspace_id,
             api_url=api_url,
-            mcp_url=mcp_url,
         )
-        mode = backend.lower().strip()
-        if mode == "api":
-            _require_saas(cfg)
-            _view_cases_steps_api_impl(
-                cfg,
-                job_id=job_id,
-                case_id=case_id,
-                page_limit=page_limit,
-                event_limit=event_limit,
-                timeout_seconds=timeout_seconds,
-                pretty=pretty,
-            )
-            return
-        if mode == "mcp":
-            if not execution_id:
-                raise ValueError("--execution-id is required for --backend mcp")
-            _view_cases_steps_mcp_impl(
-                cfg,
-                execution_id=execution_id,
-                team_slug=team_slug,
-                correlation_id=correlation_id,
-                timeout_seconds=timeout_seconds,
-                pretty=pretty,
-            )
-            return
-        raise ValueError("Unsupported backend for view-cases-steps. Use api or mcp.")
+        _require_saas(cfg)
+        _view_cases_steps_api_impl(
+            cfg,
+            job_id=job_id,
+            case_id=case_id,
+            page_limit=page_limit,
+            event_limit=event_limit,
+            timeout_seconds=timeout_seconds,
+            pretty=pretty,
+        )
 
     _handle(pretty, runner)
-
-
-@app.command("start-job")
-def start_job(
-    pretty: bool = typer.Option(False, "--pretty"),
-) -> None:
-    """Job start is not exposed via REST/MCP; returns structured limitation and suggestions."""
-    _start_job_impl(pretty=pretty)
-
-
-@app.command("mcp-tools")
-def mcp_tools(
-    profile_path: str | None = typer.Option(None, "--profile-path"),
-    mcp_url: str | None = typer.Option(None, "--mcp-url"),
-    timeout_seconds: int = typer.Option(DEFAULT_TIMEOUT, "--timeout-seconds"),
-    pretty: bool = typer.Option(False, "--pretty"),
-) -> None:
-    """List available tools on the Supervaize MCP endpoint."""
-    _handle(pretty, _mcp_tools_impl, profile_path, mcp_url, timeout_seconds, pretty)
-
-
-@app.command("mcp-call")
-def mcp_call(
-    tool_name: str = typer.Option(..., "--tool-name", help="MCP tool name to call."),
-    arguments_json: str | None = typer.Option(None, "--arguments-json", help="JSON object for tool arguments."),
-    arguments_file: str | None = typer.Option(None, "--arguments-file", help="Path to JSON file for tool arguments."),
-    profile_path: str | None = typer.Option(None, "--profile-path"),
-    mcp_url: str | None = typer.Option(None, "--mcp-url"),
-    timeout_seconds: int = typer.Option(DEFAULT_TIMEOUT, "--timeout-seconds"),
-    pretty: bool = typer.Option(False, "--pretty"),
-) -> None:
-    """Call any MCP tool (utility command)."""
-    _handle(pretty, _mcp_call_impl, profile_path, mcp_url, tool_name, arguments_json, arguments_file, timeout_seconds, pretty)
 
 
 def main() -> None:
